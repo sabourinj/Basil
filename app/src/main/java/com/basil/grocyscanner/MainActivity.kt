@@ -13,6 +13,7 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -169,10 +171,25 @@ class ScannerViewModel(private val api: GrocyApi) : ViewModel() {
                 viewModelScope.launch {
                     try {
                         _state.value = AppState.Loading("Fetching inventory data...")
-                        val entries = api.getStockEntries(product.id)
-                        _state.value = AppState.InventoryResult(product, entries)
+                        val rawEntries = api.getStockEntries(product.id)
+
+                        val groupedEntries = rawEntries
+                            .groupBy {
+                                if (it.best_before_date.isNullOrBlank()) "2999-12-31" else it.best_before_date
+                            }
+                            .map { mapEntry ->
+                                StockEntry(
+                                    id = mapEntry.value.first().id,
+                                    amount = mapEntry.value.sumOf { it.amount },
+                                    best_before_date = mapEntry.key
+                                )
+                            }
+                            .sortedBy { it.best_before_date }
+
+                        _state.value = AppState.InventoryResult(product, groupedEntries)
                     } catch (e: Exception) {
-                        _state.value = AppState.Error("Failed to fetch stock entries.")
+                        Log.e("GrocyDebug", "Inventory grouping error: ${e.message}", e)
+                        _state.value = AppState.Error("Failed to fetch or group stock entries.")
                     }
                 }
             }
@@ -407,7 +424,18 @@ fun GrocyScannerApp(viewModel: ScannerViewModel) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Basil", fontWeight = FontWeight.Bold) },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Image(
+                            painter = painterResource(id = R.drawable.basil_logo),
+                            contentDescription = "Basil Logo",
+                            modifier = Modifier
+                                .size(36.dp)
+                                .padding(end = 12.dp)
+                        )
+                        Text("Basil", fontWeight = FontWeight.Bold)
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = DarkerHeaderPurple,
                     titleContentColor = Color.White
