@@ -137,11 +137,6 @@ class ScannerViewModel(private val api: GrocyApi) : ViewModel() {
     }
 
     fun onBarcodeScanned(barcode: String) {
-        if (_state.value is AppState.Loading) {
-            Log.d("GrocyDebug", "Scan ignored: App is already processing an intent.")
-            return
-        }
-
         viewModelScope.launch {
             _state.value = AppState.Loading()
             delay(200)
@@ -227,7 +222,7 @@ class ScannerViewModel(private val api: GrocyApi) : ViewModel() {
                 val stockStr = if (remaining % 1.0 == 0.0) remaining.toInt().toString() else remaining.toString()
 
                 _state.value = AppState.Success(
-                    message = "Success!",
+                    message = "Successfully ${_currentMode.value.name.lowercase()}d!",
                     stockMessage = "Remaining Stock: $stockStr"
                 )
 
@@ -334,10 +329,9 @@ class MainActivity : ComponentActivity() {
         logging.level = HttpLoggingInterceptor.Level.BODY
 
         val okHttpClient = OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
-            .writeTimeout(15, TimeUnit.SECONDS)
-            .retryOnConnectionFailure(false)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
             .addInterceptor { chain ->
                 val original = chain.request()
                 val requestBuilder = original.newBuilder()
