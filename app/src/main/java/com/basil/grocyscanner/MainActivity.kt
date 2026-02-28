@@ -214,7 +214,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
 
             currentProduct?.let { product ->
                 if (isNewlyAdded && generativeModel != null) {
-                    _state.value = AppState.Loading("AI enriching product data...")
+                    _state.value = AppState.Loading("Enriching product data...")
                     enrichProductWithGemini(product.id, product.name)
                 }
                 processFoundProduct(product)
@@ -289,7 +289,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 var estimatedPrice: Double? = null
 
                 if (generativeModel != null) {
-                    _state.value = AppState.Loading("AI estimating price...")
+                    _state.value = AppState.Loading("Estimating price...")
                     try {
                         val pricePrompt = "Estimate the current USD price of '${product.name}'. Return a JSON object with a single key 'price' containing a float value."
                         val response = generativeModel?.generateContent(pricePrompt)
@@ -699,7 +699,7 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
                 }
                 is ScannerViewModel.AppState.Loading -> {
                     val msg = currentState.message
-                    val isAiAction = msg.contains("AI", ignoreCase = true)
+                    val isAiAction = msg.contains("Enriching", ignoreCase = true) || msg.contains("Estimating", ignoreCase = true)
                     val isLookupAction = msg.contains("Looking up", ignoreCase = true)
 
                     if (isAiAction) {
@@ -758,6 +758,17 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
                     }
                 }
                 is ScannerViewModel.AppState.InventoryResult -> {
+
+                    Text(
+                        text = currentState.product.name,
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = Color.White,
+                        textAlign = TextAlign.Center,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
                     val sharedPrefs = context.getSharedPreferences("GrocyPrefs", Context.MODE_PRIVATE)
                     val rawUrl = sharedPrefs.getString("API_URL", "") ?: ""
                     val apiToken = sharedPrefs.getString("API_TOKEN", "") ?: ""
@@ -770,16 +781,6 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
                         val encodedName = Base64.encodeToString(pictureName.toByteArray(), Base64.NO_WRAP)
                         val imageUrl = "${safeUrl}files/productpictures/$encodedName"
 
-                        Text(
-                            text = currentState.product.name,
-                            style = MaterialTheme.typography.headlineSmall,
-                            color = Color.White,
-                            textAlign = TextAlign.Center,
-                            fontWeight = FontWeight.Bold
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
                         AsyncImage(
                             model = ImageRequest.Builder(context)
                                 .data(imageUrl)
@@ -788,8 +789,8 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
                                 .build(),
                             contentDescription = "Product Image",
                             modifier = Modifier
-                                .size(240.dp)
-                                .padding(bottom = 16.dp)
+                                .size(120.dp)
+                                .padding(bottom = 8.dp)
                         )
                     }
 

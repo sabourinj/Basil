@@ -3,6 +3,10 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+base {
+    archivesName.set("basil")
+}
+
 android {
     namespace = "com.basil.grocyscanner"
     compileSdk {
@@ -16,7 +20,7 @@ android {
         minSdk = 33
         targetSdk = 36
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.1.0-AI"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
