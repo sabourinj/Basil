@@ -17,6 +17,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -134,6 +137,11 @@ class ScannerViewModel(private val api: GrocyApi) : ViewModel() {
     }
 
     fun onBarcodeScanned(barcode: String) {
+        if (_state.value is AppState.Loading) {
+            Log.d("GrocyDebug", "Scan ignored: App is already processing an intent.")
+            return
+        }
+
         viewModelScope.launch {
             _state.value = AppState.Loading()
             delay(200)
@@ -219,7 +227,7 @@ class ScannerViewModel(private val api: GrocyApi) : ViewModel() {
                 val stockStr = if (remaining % 1.0 == 0.0) remaining.toInt().toString() else remaining.toString()
 
                 _state.value = AppState.Success(
-                    message = "Successfully ${_currentMode.value.name.lowercase()}d!",
+                    message = "Success!",
                     stockMessage = "Remaining Stock: $stockStr"
                 )
 
@@ -262,6 +270,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 val currentVm = viewModel
+                // Create a simple state to track the current screen
+                var currentScreen by remember { mutableStateOf("scanner") }
+
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = DeepPurple,
@@ -295,7 +306,20 @@ class MainActivity : ComponentActivity() {
                     if (currentVm == null) {
                         UnconfiguredScreen()
                     } else {
-                        GrocyScannerApp(currentVm)
+                        // Switch between screens based on the state
+                        when (currentScreen) {
+                            "scanner" -> {
+                                GrocyScannerApp(
+                                    viewModel = currentVm,
+                                    onNavigateToSettings = { currentScreen = "settings" }
+                                )
+                            }
+                            "settings" -> {
+                                SettingsScreen(
+                                    onNavigateBack = { currentScreen = "scanner" }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -310,9 +334,10 @@ class MainActivity : ComponentActivity() {
         logging.level = HttpLoggingInterceptor.Level.BODY
 
         val okHttpClient = OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(false)
             .addInterceptor { chain ->
                 val original = chain.request()
                 val requestBuilder = original.newBuilder()
@@ -346,9 +371,16 @@ fun UnconfiguredScreen() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("App Not Configured", style = MaterialTheme.typography.headlineMedium, color = Color.White)
+        Image(
+            painter = painterResource(id = R.drawable.basil_logo),
+            contentDescription = "Basil Logo",
+            modifier = Modifier
+                .size(72.dp)
+        )
         Spacer(modifier = Modifier.height(16.dp))
-        Text("1. Generate an API Key in Grocy.\n2. Click the Show QR Code button.\n3. Scan the QR code displayed.", textAlign = TextAlign.Center, color = Color.LightGray)
+        Text("Configuration Required", style = MaterialTheme.typography.headlineMedium, color = Color.White)
+        Spacer(modifier = Modifier.height(16.dp))
+        Text("1. Generate an API Key in Grocy.\n2. Click the Show QR Code button.\n3. Scan the QR code displayed.", textAlign = TextAlign.Left, color = Color.LightGray)
     }
 }
 
@@ -374,7 +406,7 @@ fun RowScope.ModeButton(title: String, isSelected: Boolean, onClick: () -> Unit)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GrocyScannerApp(viewModel: ScannerViewModel) {
+fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Unit) {
     val state by viewModel.state.collectAsState()
     val currentMode by viewModel.currentMode.collectAsState()
     val context = LocalContext.current
@@ -426,14 +458,23 @@ fun GrocyScannerApp(viewModel: ScannerViewModel) {
             TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Basil", fontWeight = FontWeight.Bold)
                         Image(
                             painter = painterResource(id = R.drawable.basil_logo),
                             contentDescription = "Basil Logo",
                             modifier = Modifier
                                 .size(36.dp)
-                                .padding(end = 12.dp)
+                                .padding(start = 6.dp)
                         )
-                        Text("Basil", fontWeight = FontWeight.Bold)
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onNavigateToSettings) {
+                        Icon(
+                            imageVector = Icons.Filled.Settings,
+                            contentDescription = "Settings",
+                            tint = Color.White
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -484,7 +525,6 @@ fun GrocyScannerApp(viewModel: ScannerViewModel) {
                 is ScannerViewModel.AppState.Success -> {
                     Text(currentState.message, style = MaterialTheme.typography.headlineMedium, color = SuccessGreen, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold)
 
-                    // UPDATED: Now rendering the remaining stock in smaller, gray text underneath
                     if (currentState.stockMessage.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
@@ -579,5 +619,70 @@ fun ExpirationDatePrompt(product: ProductDetails, onSubmit: (String) -> Unit, on
             Spacer(modifier = Modifier.height(8.dp))
         }
         DatePicker(state = datePickerState)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsScreen(onNavigateBack: () -> Unit) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Settings", fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color.White
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = DarkerHeaderPurple,
+                    titleContentColor = Color.White
+                )
+            )
+        },
+        containerColor = DeepPurple
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.basil_logo),
+                contentDescription = "Basil Logo",
+                modifier = Modifier.size(96.dp)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "Basil",
+                style = MaterialTheme.typography.headlineLarge,
+                color = Color.White,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "Version 1.0.0",
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.LightGray
+            )
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            Text(
+                text = "Created by Justin Sabourin",
+                style = MaterialTheme.typography.bodyLarge,
+                color = Color.White
+            )
+        }
     }
 }
