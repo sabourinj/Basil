@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.grocyscanner"
+    namespace = "com.basil.grocyscanner"
     compileSdk {
         version = release(36) {
             minorApiLevel = 1
@@ -12,7 +12,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.grocyscanner"
+        applicationId = "com.basil.grocyscanner"
         minSdk = 33
         targetSdk = 36
         versionCode = 1
