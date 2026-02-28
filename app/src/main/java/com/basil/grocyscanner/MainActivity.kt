@@ -137,6 +137,11 @@ class ScannerViewModel(private val api: GrocyApi) : ViewModel() {
     }
 
     fun onBarcodeScanned(barcode: String) {
+        if (_state.value is AppState.Loading) {
+            Log.d("GrocyDebug", "Scan ignored: App is already processing an intent.")
+            return
+        }
+
         viewModelScope.launch {
             _state.value = AppState.Loading()
             delay(200)
@@ -222,7 +227,7 @@ class ScannerViewModel(private val api: GrocyApi) : ViewModel() {
                 val stockStr = if (remaining % 1.0 == 0.0) remaining.toInt().toString() else remaining.toString()
 
                 _state.value = AppState.Success(
-                    message = "Successfully ${_currentMode.value.name.lowercase()}d!",
+                    message = "Success!",
                     stockMessage = "Remaining Stock: $stockStr"
                 )
 
@@ -232,7 +237,7 @@ class ScannerViewModel(private val api: GrocyApi) : ViewModel() {
                 }
             } catch (e: HttpException) {
                 if (_currentMode.value == AppMode.CONSUME && e.code() == 400) {
-                    _state.value = AppState.Error("No stock found to consume!")
+                    _state.value = AppState.Error("No stock found!")
                 } else {
                     _state.value = AppState.Error("Action failed: HTTP ${e.code()}")
                 }
@@ -329,9 +334,10 @@ class MainActivity : ComponentActivity() {
         logging.level = HttpLoggingInterceptor.Level.BODY
 
         val okHttpClient = OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(false)
             .addInterceptor { chain ->
                 val original = chain.request()
                 val requestBuilder = original.newBuilder()
@@ -534,7 +540,7 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
                     Spacer(modifier = Modifier.height(16.dp))
 
                     if (currentState.entries.isEmpty()) {
-                        Text("No items currently in stock.", color = ErrorRed, style = MaterialTheme.typography.titleMedium)
+                        Text("No items in stock.", color = ErrorRed, style = MaterialTheme.typography.titleMedium)
                     } else {
                         Card(colors = CardDefaults.cardColors(containerColor = DarkerHeaderPurple)) {
                             Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
