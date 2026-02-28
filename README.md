@@ -1,76 +1,81 @@
-🌿 Basil: A Grocy Hardware Scanner App
-Basil is a fast, lightweight, and native Android application designed specifically for hardware barcode scanners and Android PDAs. It connects seamlessly to your self-hosted Grocy instance, allowing you to manage your pantry inventory with warehouse-level efficiency.
+# 🌿 Basil
+### *A high-performance, native Grocy client for Android PDAs.*
 
-Instead of fumbling with a mobile browser or complex app menus, Basil relies on hardware scanner intents, haptic feedback, and a streamlined Jetpack Compose UI to keep your eyes on your groceries, not your screen.
+**Basil** is a purpose-built inventory management application designed specifically for dedicated Android Barcode PDAs (like those from Zebra, Chainway, or Munich). While the official Grocy web interface is powerful, it can be cumbersome on small, industrial screens. Basil solves this by providing a "Headless-Ready," high-contrast, and lightning-fast scanning experience.
 
-✨ Key Features
-Three Operational Modes: * Purchase: Add items to stock. Prompts for an expiration date only if the Grocy category requires it.
+---
 
-Consume: Remove items from stock (automatically pulls from the oldest batch).
+## 📖 Overview
+Basil turns your PDA into a professional-grade warehouse tool. It is designed for speed, reliability, and one-handed operation in your pantry or kitchen. 
 
-Inventory: View a detailed table of all current stock batches and their specific expiration dates.
+By leveraging **Hardware Scanner Intents**, the app doesn't need to initialize a camera or manage autofocus. It listens at the OS level, processes the API logic in the background, and provides immediate haptic feedback so you can keep your eyes on the physical stock.
 
-OpenFoodFacts Auto-Resolution: Scan a barcode Grocy has never seen before? Basil automatically triggers Grocy's OpenFoodFacts plugin to download the product details, build the master data, and add it to your stock in a single, seamless motion.
+## ✨ Key Features
 
-Headless-Ready Haptics: Distinct vibration patterns for Success, Error, and User Input allow you to scan groceries without looking at the screen.
+### 🛒 Multi-Mode Workflow
+* **Purchase Mode:** Quickly add items to your stock. Basil intelligently checks the product's Grocy category—it only prompts for an expiration date if the category requires it or if a default shelf-life isn't set.
+* **Consume Mode:** Scan to remove. Basil follows your Grocy instance's transaction logic (typically FIFO) to ensure your virtual inventory matches the physical reality.
+-   **Inventory Lookup:** Instantly view a detailed breakdown of every batch currently in stock, including specific expiration dates and quantities for each.
 
-Instant Configuration: Setup the app in one second by scanning a Grocy-generated QR code.
+### 🔍 Intelligent Product Resolution
+* **Local-First:** Basil first checks your Grocy database for the barcode.
+* **Global Fallback:** If unknown, it triggers a background sync with **OpenFoodFacts** via Grocy's external lookup API.
+* **Smart Defaults:** Newly discovered items are automatically assigned to your user's **Default Location** (configured in Grocy User Settings), preventing the "Missing Location" errors common in other apps.
 
-🚀 Installation & Setup
-1. Configure Your Scanner PDA
-Basil listens for a specific Android Broadcast Intent emitted by your hardware scanner. Open your PDA's built-in scanner configuration app (often called "Scanner", "DataWedge", or "BarcodeLog") and set the intent output to:
+### 📱 Industrial Design
+* **Deep Purple UI:** High-contrast, dark-themed interface designed to reduce eye strain and look sleek on industrial displays.
+* **Haptic Language:** * *Short Pulse:* Success / Scan Accepted.
+    * *Double Pulse:* Error / Item Not Found.
+    * *Triple Pulse:* Input Required (e.g., Expiration Date needed).
 
-Action: com.grocy.scanner.SCAN
+---
 
-String Extra: barcode_data
+## 🛠 Setup & Configuration
 
-2. Connect to Grocy
-In your Grocy Web UI, click the Settings icon (top right) -> Manage API keys -> Add.
+### 1. The "Magic" QR Code
+Basil uses a zero-config setup. Generate a QR code (using any generator) with your Grocy URL and API Key separated by a pipe (`|`):
+`https://grocy.yourdomain.com/api|your_secret_api_key_here`
 
-Generate a QR code containing your URL and API key separated by a pipe character. Example format:
-https://grocy.yourdomain.com|YOUR_API_KEY_HERE
+Scan this inside the app to instantly link your device.
 
-Open Basil on your PDA and scan the QR code. The app will automatically save your credentials and connect.
+### 2. Scanner Intent Configuration
+For the hardware buttons to work, configure your PDA's "Scanner" or "DataWedge" app:
+* **Intent Action:** `com.basil.grocyscanner.SCAN`
+* **Intent Delivery:** `Broadcast Intent`
+* **String Extra:** `barcode_data`
 
-Pro-Tip for New Products: To ensure newly discovered items are routed correctly, go to your Grocy User Settings (Profile Icon -> User settings) and configure the "Default location for new products". Basil relies on this server-side setting during the OpenFoodFacts fallback to keep network calls to an absolute minimum.
+---
 
-🧠 Architecture & API Logic
-Basil is built using Kotlin, Jetpack Compose, and Retrofit following the MVVM architecture.
+## 💻 Technical Architecture
 
-The OpenFoodFacts Fallback
-The hardest part of home inventory is handling unknown barcodes. Basil handles this gracefully:
+Basil is built using modern Android standards to ensure long-term maintainability:
 
-The app queries the local Grocy DB (GET stock/products/by-barcode/{barcode}).
+* **Language:** Kotlin 2.x
+* **UI Framework:** Jetpack Compose (Declarative UI)
+* **Networking:** Retrofit 2 + OkHttp 4
+* **JSON Parsing:** Gson
+* **Async Logic:** Kotlin Coroutines & Flow
+* **Architecture:** MVVM (Model-View-ViewModel)
 
-If it returns a 400/404, Basil assumes it's a new item and hits the external lookup trigger (GET stock/barcodes/external-lookup/{barcode}?add=true).
+### API Implementation
+Basil communicates with the Grocy REST API. Key endpoints include:
+* `/stock/products/by-barcode/{barcode}`: Primary resolution.
+* `/stock/barcodes/external-lookup/{barcode}?add=true`: The "magic" auto-add trigger.
+* `/stock/products/{productId}/entries`: Powers the Inventory table.
 
-Grocy's backend reaches out to OpenFoodFacts, builds the product, and assigns your user's default location entirely server-side.
+---
 
-Basil fetches the newly minted product ID and proceeds to the Expiration Date / Success screen.
+## 🤝 Contributing & Open Source
+Basil is open-source because the self-hosting community thrives on shared tools. 
 
-API Endpoints Used
-Basil is incredibly lightweight and only interacts with the following native Grocy REST endpoints:
+1.  **Fork** the repository.
+2.  **Create** a feature branch (`git checkout -b feature/AmazingFeature`).
+3.  **Commit** your changes (`git commit -m 'Add some AmazingFeature'`).
+4.  **Push** to the branch (`git push origin feature/AmazingFeature`).
+5.  **Open** a Pull Request.
 
-GET stock/products/by-barcode/{barcode} - Resolves barcodes to Product IDs.
+## 📜 License
+Distributed under the **MIT License**. See `LICENSE` for more information.
 
-GET stock/products/{productId} - Fetches current total stock amounts.
-
-GET stock/products/{productId}/entries - Populates the detailed Inventory table.
-
-POST stock/products/{productId}/add - Executes Purchase workflows.
-
-POST stock/products/{productId}/consume - Executes Consume workflows.
-
-GET stock/barcodes/external-lookup/{barcode}?add=true - Triggers the OFF plugin.
-
-🛠 Building from Source
-Clone the repository.
-
-Open the project in Android Studio.
-
-Build the Release APK: Build -> Generate Signed Bundle / APK...
-
-Sideload the generated app-release.apk onto your Android PDA.
-
-📜 License
-[Insert your chosen open-source license here, e.g., MIT, GPL-3.0]
+---
+*Developed with ❤️ by Justin P. Sabourin for the Grocy Community.*
