@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.util.Base64
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -24,6 +25,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -32,6 +35,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import com.google.ai.client.generativeai.GenerativeModel
+import com.google.ai.client.generativeai.type.generationConfig
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,6 +48,7 @@ import okhttp3.OkHttpClient
 import okhttp3.RequestBody
 import okhttp3.logging.HttpLoggingInterceptor
 import okio.BufferedSink
+import org.json.JSONObject
 import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -56,35 +64,14 @@ val SuccessGreen = Color(0xFFA5D6A7)
 val ErrorRed = Color(0xFFEF9A9A)
 
 // --- DATA MODELS ---
-data class ProductResponse(
-    val product: ProductDetails,
-    val stock_amount: Double?
-)
-
-data class ProductDetails(
-    val id: Int,
-    val name: String,
-    val category_id: Int?,
-    val default_best_before_days: Int
-)
-
-data class AddStockRequest(
-    val amount: Int,
-    val best_before_date: String? = null,
-    val transaction_type: String = "purchase"
-)
-
-data class ConsumeStockRequest(
-    val amount: Int,
-    val transaction_type: String = "consume",
-    val spoiled: Boolean = false
-)
-
-data class StockEntry(
-    val id: Int,
-    val amount: Double,
-    val best_before_date: String?
-)
+data class ProductResponse(val product: ProductDetails, val stock_amount: Double?)
+data class ProductDetails(val id: Int, val name: String, val category_id: Int?, val default_best_before_days: Int, val picture_file_name: String? = null)
+data class AddStockRequest(val amount: Int, val price: Double? = null, val best_before_date: String? = null, val transaction_type: String = "purchase")
+data class ConsumeStockRequest(val amount: Int, val transaction_type: String = "consume", val spoiled: Boolean = false)
+data class OpenStockRequest(val amount: Int = 1)
+data class StockEntry(val id: Int, val amount: Double, val best_before_date: String?)
+data class GrocyLocation(val id: Int, val name: String)
+data class GrocyProductGroup(val id: Int, val name: String)
 
 // --- RETROFIT INTERFACE ---
 interface GrocyApi {
@@ -103,24 +90,38 @@ interface GrocyApi {
     @POST("stock/products/{productId}/consume")
     suspend fun consumeStock(@Path("productId") productId: Int, @Body request: ConsumeStockRequest)
 
+    @POST("stock/products/{productId}/open")
+    suspend fun openStock(@Path("productId") productId: Int, @Body request: OpenStockRequest)
+
+    @POST("stock/products/{productId}/printlabel")
+    suspend fun printLabel(@Path("productId") productId: Int)
+
     @GET("stock/barcodes/external-lookup/{barcode}")
-    suspend fun externalBarcodeLookup(
-        @Path("barcode") barcode: String,
-        @Query("add") add: Boolean = true
-    ): Any
+    suspend fun externalBarcodeLookup(@Path("barcode") barcode: String, @Query("add") add: Boolean = true): Any
+
+    @GET("objects/locations")
+    suspend fun getLocations(): List<GrocyLocation>
+
+    @GET("objects/product_groups")
+    suspend fun getProductGroups(): List<GrocyProductGroup>
+
+    @PUT("objects/products/{productId}")
+    suspend fun updateProduct(@Path("productId") productId: Int, @Body productData: @JvmSuppressWildcards Map<String, Any>)
 }
 
 // --- VIEWMODEL ---
 enum class AppMode { PURCHASE, CONSUME, INVENTORY }
 
-class ScannerViewModel(private val api: GrocyApi) : ViewModel() {
+class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: String?) : ViewModel() {
     private val categoriesRequiringDate = listOf(3, 5, 8)
+    private var cachedLocations = listOf<GrocyLocation>()
+    private var cachedGroups = listOf<GrocyProductGroup>()
 
     sealed class AppState {
         object Idle : AppState()
         data class Loading(val message: String = "Communicating with Grocy...") : AppState()
-        data class NeedsDate(val product: ProductDetails) : AppState()
-        data class Success(val message: String, val stockMessage: String = "") : AppState()
+        data class NeedsDate(val product: ProductDetails, val estimatedPrice: Double? = null) : AppState()
+        data class Success(val message: String, val stockMessage: String = "", val productId: Int? = null) : AppState()
         data class Error(val error: String) : AppState()
         data class InventoryResult(val product: ProductDetails, val entries: List<StockEntry>) : AppState()
     }
@@ -131,6 +132,30 @@ class ScannerViewModel(private val api: GrocyApi) : ViewModel() {
     private val _currentMode = MutableStateFlow(AppMode.PURCHASE)
     val currentMode: StateFlow<AppMode> = _currentMode
 
+    private var lastScanTime = 0L
+    private var lastScannedBarcode = ""
+
+    private val generativeModel by lazy {
+        geminiApiKey?.let {
+            GenerativeModel(
+                modelName = "gemini-2.5-flash",
+                apiKey = it,
+                generationConfig = generationConfig { responseMimeType = "application/json" }
+            )
+        }
+    }
+
+    init {
+        viewModelScope.launch {
+            try {
+                cachedLocations = api.getLocations()
+                cachedGroups = api.getProductGroups()
+            } catch (e: Exception) {
+                Log.e("BasilDebug", "Failed to cache locations/groups: ${e.message}")
+            }
+        }
+    }
+
     fun setMode(mode: AppMode) {
         _currentMode.value = mode
         resetState()
@@ -138,17 +163,29 @@ class ScannerViewModel(private val api: GrocyApi) : ViewModel() {
 
     fun onBarcodeScanned(barcode: String) {
         if (_state.value is AppState.Loading) {
-            Log.d("GrocyDebug", "Scan ignored: App is already processing an intent.")
+            Log.d("BasilDebug", "Scan ignored: App is busy.")
             return
         }
 
+        val currentTime = System.currentTimeMillis()
+        if (barcode == lastScannedBarcode && (currentTime - lastScanTime) < 1500) {
+            Log.d("BasilDebug", "Scan ignored: Duplicate debounced.")
+            return
+        }
+
+        lastScannedBarcode = barcode
+        lastScanTime = currentTime
+
         viewModelScope.launch {
-            _state.value = AppState.Loading()
-            delay(200)
+            _state.value = AppState.Loading("Identifying barcode...")
+            delay(150)
+
+            var isNewlyAdded = false
+            var currentProduct: ProductDetails? = null
 
             try {
                 val response = api.getProductByBarcode(barcode)
-                processFoundProduct(response.product)
+                currentProduct = response.product
             } catch (e: HttpException) {
                 if (_currentMode.value == AppMode.INVENTORY) {
                     _state.value = AppState.Error("Product not found in database.")
@@ -159,65 +196,126 @@ class ScannerViewModel(private val api: GrocyApi) : ViewModel() {
                 try {
                     api.externalBarcodeLookup(barcode, true)
                 } catch (ex: Exception) {
-                    Log.w("GrocyDebug", "External lookup timeout/error.")
+                    Log.w("BasilDebug", "External lookup timeout/error.")
                 }
+
                 try {
                     val newResponse = api.getProductByBarcode(barcode)
-                    processFoundProduct(newResponse.product)
+                    currentProduct = newResponse.product
+                    isNewlyAdded = true
                 } catch (ex: Exception) {
-                    _state.value = AppState.Error("Unable to identify new product.\n\nAdd manually in Grocy.")
+                    _state.value = AppState.Error("Unable to identify new product.\nAdd manually in Grocy.")
+                    return@launch
                 }
             } catch (e: Exception) {
                 _state.value = AppState.Error("Network Error: ${e.message}")
+                return@launch
+            }
+
+            currentProduct?.let { product ->
+                if (isNewlyAdded && generativeModel != null) {
+                    _state.value = AppState.Loading("AI enriching product data...")
+                    enrichProductWithGemini(product.id, product.name)
+                }
+                processFoundProduct(product)
             }
         }
     }
 
-    private fun processFoundProduct(product: ProductDetails) {
+    private suspend fun enrichProductWithGemini(productId: Int, name: String) {
+        try {
+            val locationList = cachedLocations.joinToString { "${it.id}: ${it.name}" }
+            val groupList = cachedGroups.joinToString { "${it.id}: ${it.name}" }
+
+            val prompt = """
+                Analyze the grocery product: "$name".
+                Available Locations: [$locationList]
+                Available Product Groups: [$groupList]
+                
+                Return a strict JSON object with these EXACT keys based on your best estimates:
+                - "default_best_before_days" (int)
+                - "default_best_before_days_after_open" (int)
+                - "default_best_before_days_after_freezing" (int)
+                - "default_best_before_days_after_thawing" (int)
+                - "should_not_be_frozen" (int, 1 for yes, 0 for no)
+                - "product_group_id" (int, choose best match from available groups or null if none fit)
+                - "location_id" (int, choose best match from available locations or null if none fit)
+            """.trimIndent()
+
+            val response = generativeModel?.generateContent(prompt)
+            response?.text?.let { jsonStr ->
+                val json = JSONObject(jsonStr)
+                val updateMap = mutableMapOf<String, Any>()
+
+                updateMap["default_best_before_days"] = json.optInt("default_best_before_days", 0)
+                updateMap["default_best_before_days_after_open"] = json.optInt("default_best_before_days_after_open", 0)
+                updateMap["default_best_before_days_after_freezing"] = json.optInt("default_best_before_days_after_freezing", 0)
+                updateMap["default_best_before_days_after_thawing"] = json.optInt("default_best_before_days_after_thawing", 0)
+                updateMap["should_not_be_frozen"] = json.optInt("should_not_be_frozen", 0)
+
+                if (json.has("product_group_id") && !json.isNull("product_group_id")) updateMap["product_group_id"] = json.getInt("product_group_id")
+                if (json.has("location_id") && !json.isNull("location_id")) updateMap["location_id"] = json.getInt("location_id")
+
+                api.updateProduct(productId, updateMap)
+            }
+        } catch (e: Exception) {
+            Log.e("BasilDebug", "AI Enrichment Failed: ${e.message}")
+        }
+    }
+
+    private suspend fun processFoundProduct(product: ProductDetails) {
         when (_currentMode.value) {
             AppMode.INVENTORY -> {
-                viewModelScope.launch {
-                    try {
-                        _state.value = AppState.Loading("Fetching inventory data...")
-                        val rawEntries = api.getStockEntries(product.id)
-
-                        val groupedEntries = rawEntries
-                            .groupBy {
-                                if (it.best_before_date.isNullOrBlank()) "2999-12-31" else it.best_before_date
-                            }
-                            .map { mapEntry ->
-                                StockEntry(
-                                    id = mapEntry.value.first().id,
-                                    amount = mapEntry.value.sumOf { it.amount },
-                                    best_before_date = mapEntry.key
-                                )
-                            }
-                            .sortedBy { it.best_before_date }
-
-                        _state.value = AppState.InventoryResult(product, groupedEntries)
-                    } catch (e: Exception) {
-                        Log.e("GrocyDebug", "Inventory grouping error: ${e.message}", e)
-                        _state.value = AppState.Error("Failed to fetch or group stock entries.")
-                    }
+                try {
+                    _state.value = AppState.Loading("Fetching inventory data...")
+                    val rawEntries = api.getStockEntries(product.id)
+                    val groupedEntries = rawEntries
+                        .groupBy { if (it.best_before_date.isNullOrBlank()) "2999-12-31" else it.best_before_date }
+                        .map { mapEntry ->
+                            StockEntry(
+                                id = mapEntry.value.first().id,
+                                amount = mapEntry.value.sumOf { it.amount },
+                                best_before_date = mapEntry.key
+                            )
+                        }
+                        .sortedBy { it.best_before_date }
+                    _state.value = AppState.InventoryResult(product, groupedEntries)
+                } catch (e: Exception) {
+                    _state.value = AppState.Error("Failed to fetch stock entries.")
                 }
             }
-            AppMode.CONSUME -> confirmAction(product.id, 1, null)
+            AppMode.CONSUME -> confirmAction(product.id, 1, null, null)
             AppMode.PURCHASE -> {
+                var estimatedPrice: Double? = null
+
+                if (generativeModel != null) {
+                    _state.value = AppState.Loading("AI estimating price...")
+                    try {
+                        val pricePrompt = "Estimate the current USD price of '${product.name}'. Return a JSON object with a single key 'price' containing a float value."
+                        val response = generativeModel?.generateContent(pricePrompt)
+                        response?.text?.let { jsonStr ->
+                            estimatedPrice = JSONObject(jsonStr).optDouble("price", 0.0).takeIf { it > 0.0 }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("BasilDebug", "Price estimation failed: ${e.message}")
+                    }
+                }
+
                 if (product.category_id in categoriesRequiringDate || product.default_best_before_days > 0) {
-                    _state.value = AppState.NeedsDate(product)
+                    _state.value = AppState.NeedsDate(product, estimatedPrice)
                 } else {
-                    confirmAction(product.id, 1, null)
+                    confirmAction(product.id, 1, null, estimatedPrice)
                 }
             }
         }
     }
 
-    fun confirmAction(productId: Int, amount: Int, expireDate: String?) {
+    fun confirmAction(productId: Int, amount: Int, expireDate: String?, price: Double?) {
         viewModelScope.launch {
             _state.value = AppState.Loading(if (_currentMode.value == AppMode.PURCHASE) "Adding to stock..." else "Consuming stock...")
             try {
                 if (_currentMode.value == AppMode.PURCHASE) {
-                    api.addStock(productId, AddStockRequest(amount, expireDate))
+                    api.addStock(productId, AddStockRequest(amount, price, expireDate))
                 } else {
                     api.consumeStock(productId, ConsumeStockRequest(amount))
                 }
@@ -228,21 +326,35 @@ class ScannerViewModel(private val api: GrocyApi) : ViewModel() {
 
                 _state.value = AppState.Success(
                     message = "Success!",
-                    stockMessage = "Remaining Stock: $stockStr"
+                    stockMessage = "Remaining Stock: $stockStr",
+                    productId = productId
                 )
 
-                delay(2000)
-                if (_state.value is AppState.Success) {
-                    resetState()
-                }
+                delay(6000)
+                if (_state.value is AppState.Success) resetState()
+
             } catch (e: HttpException) {
                 if (_currentMode.value == AppMode.CONSUME && e.code() == 400) {
-                    _state.value = AppState.Error("No stock found!")
+                    _state.value = AppState.Error("No stock found to consume!")
                 } else {
                     _state.value = AppState.Error("Action failed: HTTP ${e.code()}")
                 }
             } catch (e: Exception) {
                 _state.value = AppState.Error("Action failed: ${e.message}")
+            }
+        }
+    }
+
+    fun performQuickAction(productId: Int, action: String) {
+        viewModelScope.launch {
+            try {
+                when(action) {
+                    "open" -> api.openStock(productId, OpenStockRequest())
+                    "print" -> api.printLabel(productId)
+                }
+                resetState()
+            } catch (e: Exception) {
+                _state.value = AppState.Error("Quick action failed: ${e.message}")
             }
         }
     }
@@ -256,77 +368,117 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         window.statusBarColor = android.graphics.Color.parseColor("#422939")
 
         val sharedPrefs = getSharedPreferences("GrocyPrefs", MODE_PRIVATE)
         val savedUrl = sharedPrefs.getString("API_URL", null)
         val savedToken = sharedPrefs.getString("API_TOKEN", null)
+        val geminiKey = sharedPrefs.getString("GEMINI_KEY", null)
 
         if (!savedUrl.isNullOrBlank() && !savedToken.isNullOrBlank()) {
-            initializeApi(savedUrl, savedToken)
+            val aiKeyToUse = if (sharedPrefs.getBoolean("AI_ENABLED", false)) geminiKey else null
+            initializeApi(savedUrl, savedToken, aiKeyToUse)
         }
 
         setContent {
             MaterialTheme {
                 val currentVm = viewModel
-                // Create a simple state to track the current screen
-                var currentScreen by remember { mutableStateOf("scanner") }
+                var aiEnabledState by remember { mutableStateOf(sharedPrefs.getBoolean("AI_ENABLED", false)) }
 
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = DeepPurple,
-                    contentColor = Color.White
-                ) {
-                    DisposableEffect(Unit) {
+                var currentScreen by remember {
+                    mutableStateOf(
+                        if (savedUrl.isNullOrBlank()) "unconfigured"
+                        else if (!sharedPrefs.contains("AI_ENABLED")) "ai_setup"
+                        else "scanner"
+                    )
+                }
+
+                Surface(modifier = Modifier.fillMaxSize(), color = DeepPurple, contentColor = Color.White) {
+
+                    DisposableEffect(currentScreen) {
                         val receiver = object : BroadcastReceiver() {
                             override fun onReceive(context: Context?, intent: Intent?) {
                                 val scannedText = intent?.getStringExtra("barcode_data")?.trim()
                                 if (scannedText.isNullOrBlank()) return
 
-                                if (scannedText.contains("|")) {
-                                    val parts = scannedText.split("|")
-                                    if (parts.size >= 2) {
-                                        val url = parts[0]
-                                        val token = parts[1]
-                                        sharedPrefs.edit().putString("API_URL", url).putString("API_TOKEN", token).apply()
-                                        initializeApi(url, token)
+                                when (currentScreen) {
+                                    "unconfigured" -> {
+                                        if (scannedText.contains("|")) {
+                                            val parts = scannedText.split("|")
+                                            if (parts.size >= 2) {
+                                                sharedPrefs.edit().putString("API_URL", parts[0]).putString("API_TOKEN", parts[1]).apply()
+                                                currentScreen = "ai_setup"
+                                            }
+                                        }
                                     }
-                                } else {
-                                    viewModel?.onBarcodeScanned(scannedText)
+                                    "ai_setup" -> {
+                                        sharedPrefs.edit().putString("GEMINI_KEY", scannedText).apply()
+                                        aiEnabledState = true
+                                        initializeApi(
+                                            sharedPrefs.getString("API_URL", "")!!,
+                                            sharedPrefs.getString("API_TOKEN", "")!!,
+                                            scannedText
+                                        )
+                                        currentScreen = "scanner"
+                                    }
+                                    "scanner" -> {
+                                        viewModel?.onBarcodeScanned(scannedText)
+                                    }
                                 }
                             }
                         }
-                        registerReceiver(receiver, IntentFilter("com.basil.grocyscanner.SCAN"),
-                            RECEIVER_EXPORTED
-                        )
+                        registerReceiver(receiver, IntentFilter("com.basil.grocyscanner.SCAN"), RECEIVER_EXPORTED)
                         onDispose { unregisterReceiver(receiver) }
                     }
 
-                    if (currentVm == null) {
-                        UnconfiguredScreen()
-                    } else {
-                        // Switch between screens based on the state
-                        when (currentScreen) {
-                            "scanner" -> {
-                                GrocyScannerApp(
-                                    viewModel = currentVm,
-                                    onNavigateToSettings = { currentScreen = "settings" }
-                                )
+                    when (currentScreen) {
+                        "unconfigured" -> UnconfiguredScreen()
+                        "ai_setup" -> AiSetupScreen(
+                            onEnableAi = {
+                                sharedPrefs.edit().putBoolean("AI_ENABLED", true).apply()
+                                aiEnabledState = true
+                            },
+                            onSkip = {
+                                sharedPrefs.edit().putBoolean("AI_ENABLED", false).apply()
+                                aiEnabledState = false
+                                initializeApi(sharedPrefs.getString("API_URL", "")!!, sharedPrefs.getString("API_TOKEN", "")!!, null)
+                                currentScreen = "scanner"
                             }
-                            "settings" -> {
-                                SettingsScreen(
-                                    onNavigateBack = { currentScreen = "scanner" }
-                                )
-                            }
+                        )
+                        "scanner" -> currentVm?.let {
+                            GrocyScannerApp(it, onNavigateToSettings = { currentScreen = "settings" })
                         }
+                        "settings" -> SettingsScreen(
+                            isAiEnabled = aiEnabledState,
+                            onToggleAi = { enabled ->
+                                aiEnabledState = enabled
+                                sharedPrefs.edit().putBoolean("AI_ENABLED", enabled).apply()
+
+                                if (enabled && sharedPrefs.getString("GEMINI_KEY", null).isNullOrBlank()) {
+                                    currentScreen = "ai_setup"
+                                } else {
+                                    initializeApi(
+                                        sharedPrefs.getString("API_URL", "")!!,
+                                        sharedPrefs.getString("API_TOKEN", "")!!,
+                                        if (enabled) sharedPrefs.getString("GEMINI_KEY", null) else null
+                                    )
+                                }
+                            },
+                            onLogout = {
+                                sharedPrefs.edit().clear().apply()
+                                viewModel = null
+                                aiEnabledState = false
+                                currentScreen = "unconfigured"
+                            },
+                            onNavigateBack = { currentScreen = "scanner" }
+                        )
                     }
                 }
             }
         }
     }
 
-    private fun initializeApi(url: String, token: String) {
+    private fun initializeApi(url: String, token: String, geminiKey: String?) {
         var safeUrl = if (url.endsWith("/")) url else "$url/"
         if (!safeUrl.endsWith("api/")) safeUrl += "api/"
 
@@ -334,9 +486,9 @@ class MainActivity : ComponentActivity() {
         logging.level = HttpLoggingInterceptor.Level.BODY
 
         val okHttpClient = OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
-            .writeTimeout(15, TimeUnit.SECONDS)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
             .retryOnConnectionFailure(false)
             .addInterceptor { chain ->
                 val original = chain.request()
@@ -358,26 +510,62 @@ class MainActivity : ComponentActivity() {
         val retrofit = Retrofit.Builder().baseUrl(safeUrl).client(okHttpClient)
             .addConverterFactory(GsonConverterFactory.create()).build()
 
-        viewModel = ScannerViewModel(retrofit.create(GrocyApi::class.java))
+        viewModel = ScannerViewModel(retrofit.create(GrocyApi::class.java), geminiKey)
     }
 }
 
 // --- UI SCREENS ---
 
 @Composable
-fun UnconfiguredScreen() {
+fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
+    var step by remember { mutableStateOf(1) }
+
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
+        modifier = Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Image(
-            painter = painterResource(id = R.drawable.basil_logo),
-            contentDescription = "Basil Logo",
-            modifier = Modifier
-                .size(72.dp)
-        )
-        Spacer(modifier = Modifier.height(16.dp))
+        if (step == 1) {
+            Image(
+                painter = painterResource(id = R.drawable.gemini_logo),
+                contentDescription = "Gemini Logo",
+                modifier = Modifier.size(80.dp)
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text("Enable AI Features?", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(16.dp))
+            Text("Basil can use Google Gemini to automatically estimate expiration rules, predict prices, and organize new products into your database categories.", textAlign = TextAlign.Center, color = Color.LightGray)
+            Spacer(modifier = Modifier.height(32.dp))
+
+            Button(onClick = {
+                onEnableAi()
+                step = 2
+            }, colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = DeepPurple)) {
+                Text("Enable Gemini AI", fontWeight = FontWeight.Bold)
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            TextButton(onClick = onSkip) { Text("Skip for now", color = Color.LightGray) }
+
+        } else {
+            Image(
+                painter = painterResource(id = R.drawable.gemini_logo),
+                contentDescription = "Gemini Logo",
+                modifier = Modifier.size(80.dp)
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            Text("Scan Gemini Key", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(16.dp))
+            Text("Create an API Key in Google AI Studio, generate a QR code for it, and scan it now with your PDA.", textAlign = TextAlign.Center, color = Color.LightGray)
+        }
+    }
+}
+
+@Composable
+fun UnconfiguredScreen() {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Image(painter = painterResource(id = R.drawable.basil_logo), contentDescription = "Basil Logo", modifier = Modifier.size(80.dp))
+        Spacer(modifier = Modifier.height(24.dp))
         Text("Configuration Required", style = MaterialTheme.typography.headlineMedium, color = Color.White)
         Spacer(modifier = Modifier.height(16.dp))
         Text("1. Generate an API Key in Grocy.\n2. Click the Show QR Code button.\n3. Scan the QR code displayed.", textAlign = TextAlign.Left, color = Color.LightGray)
@@ -388,15 +576,13 @@ fun UnconfiguredScreen() {
 fun RowScope.ModeButton(title: String, isSelected: Boolean, onClick: () -> Unit) {
     if (isSelected) {
         Button(
-            onClick = onClick,
-            modifier = Modifier.weight(1f),
+            onClick = onClick, modifier = Modifier.weight(1f),
             colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DeepPurple),
             contentPadding = PaddingValues(0.dp)
         ) { Text(title, fontWeight = FontWeight.Bold, maxLines = 1) }
     } else {
         OutlinedButton(
-            onClick = onClick,
-            modifier = Modifier.weight(1f),
+            onClick = onClick, modifier = Modifier.weight(1f),
             border = BorderStroke(1.dp, Color.LightGray),
             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.LightGray),
             contentPadding = PaddingValues(0.dp)
@@ -424,30 +610,13 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
     LaunchedEffect(state) {
         when (state) {
             is ScannerViewModel.AppState.Success, is ScannerViewModel.AppState.InventoryResult -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
-                } else {
-                    @Suppress("DEPRECATION")
-                    vibrator.vibrate(200)
-                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+                else @Suppress("DEPRECATION") vibrator.vibrate(200)
             }
-            is ScannerViewModel.AppState.NeedsDate -> {
-                val pattern = longArrayOf(0, 50, 100, 50, 100, 50)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
-                } else {
-                    @Suppress("DEPRECATION")
-                    vibrator.vibrate(pattern, -1)
-                }
-            }
-            is ScannerViewModel.AppState.Error -> {
+            is ScannerViewModel.AppState.NeedsDate, is ScannerViewModel.AppState.Error -> {
                 val pattern = longArrayOf(0, 150, 100, 150)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
-                } else {
-                    @Suppress("DEPRECATION")
-                    vibrator.vibrate(pattern, -1)
-                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                else @Suppress("DEPRECATION") vibrator.vibrate(pattern, -1)
             }
             else -> {}
         }
@@ -458,37 +627,23 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
             TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Basil", fontWeight = FontWeight.Bold)
                         Image(
                             painter = painterResource(id = R.drawable.basil_logo),
                             contentDescription = "Basil Logo",
-                            modifier = Modifier
-                                .size(36.dp)
-                                .padding(start = 6.dp)
+                            modifier = Modifier.size(36.dp).padding(end = 12.dp)
                         )
+                        Text("Basil", fontWeight = FontWeight.Bold)
                     }
                 },
                 actions = {
-                    IconButton(onClick = onNavigateToSettings) {
-                        Icon(
-                            imageVector = Icons.Filled.Settings,
-                            contentDescription = "Settings",
-                            tint = Color.White
-                        )
-                    }
+                    IconButton(onClick = onNavigateToSettings) { Icon(imageVector = Icons.Filled.Settings, contentDescription = "Settings", tint = Color.White) }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = DarkerHeaderPurple,
-                    titleContentColor = Color.White
-                )
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkerHeaderPurple, titleContentColor = Color.White)
             )
         },
         bottomBar = {
             Surface(color = DarkerHeaderPurple) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ModeButton("Purchase", currentMode == AppMode.PURCHASE) { viewModel.setMode(AppMode.PURCHASE) }
                     ModeButton("Consume", currentMode == AppMode.CONSUME) { viewModel.setMode(AppMode.CONSUME) }
                     ModeButton("Inventory", currentMode == AppMode.INVENTORY) { viewModel.setMode(AppMode.INVENTORY) }
@@ -497,50 +652,149 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
         },
         containerColor = Color.Transparent
     ) { paddingValues ->
-
         Column(
-            modifier = Modifier
-                .padding(paddingValues)
-                .padding(16.dp)
-                .fillMaxSize(),
+            modifier = Modifier.padding(paddingValues).padding(16.dp).fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
             when (val currentState = state) {
                 is ScannerViewModel.AppState.Idle -> {
-                    Text("Ready to Scan", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, color = Color.White)
+                    Box(
+                        modifier = Modifier
+                            .padding(24.dp)
+                            .size(width = 280.dp, height = 180.dp)
+                            .drawBehind {
+                                val strokeWidthPx = 4.dp.toPx()
+                                val cornerLengthPx = 40.dp.toPx()
+                                val bracketColor = Color.White.copy(alpha = 0.7f)
+
+                                val w = size.width
+                                val h = size.height
+
+                                // Top Left
+                                drawLine(bracketColor, Offset(0f, 0f), Offset(cornerLengthPx, 0f), strokeWidthPx)
+                                drawLine(bracketColor, Offset(0f, 0f), Offset(0f, cornerLengthPx), strokeWidthPx)
+
+                                // Top Right
+                                drawLine(bracketColor, Offset(w, 0f), Offset(w - cornerLengthPx, 0f), strokeWidthPx)
+                                drawLine(bracketColor, Offset(w, 0f), Offset(w, cornerLengthPx), strokeWidthPx)
+
+                                // Bottom Left
+                                drawLine(bracketColor, Offset(0f, h), Offset(cornerLengthPx, h), strokeWidthPx)
+                                drawLine(bracketColor, Offset(0f, h), Offset(0f, h - cornerLengthPx), strokeWidthPx)
+
+                                // Bottom Right
+                                drawLine(bracketColor, Offset(w, h), Offset(w - cornerLengthPx, h), strokeWidthPx)
+                                drawLine(bracketColor, Offset(w, h), Offset(w, h - cornerLengthPx), strokeWidthPx)
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Ready to Scan",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White
+                        )
+                    }
                 }
                 is ScannerViewModel.AppState.Loading -> {
-                    CircularProgressIndicator(modifier = Modifier.size(64.dp), strokeWidth = 6.dp, color = Color.White)
+                    val msg = currentState.message
+                    val isAiAction = msg.contains("AI", ignoreCase = true)
+                    val isLookupAction = msg.contains("Looking up", ignoreCase = true)
+
+                    if (isAiAction) {
+                        Image(
+                            painter = painterResource(id = R.drawable.gemini_logo),
+                            contentDescription = "Gemini Processing",
+                            modifier = Modifier
+                                .size(80.dp)
+                                .padding(bottom = 16.dp)
+                        )
+                    } else if (isLookupAction) {
+                        Image(
+                            painter = painterResource(id = R.drawable.openfoodfacts_logo),
+                            contentDescription = "Open Food Facts Lookup",
+                            modifier = Modifier
+                                .size(80.dp)
+                                .padding(bottom = 16.dp)
+                        )
+                    } else {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(64.dp),
+                            strokeWidth = 6.dp,
+                            color = Color.White
+                        )
+                    }
+
                     Spacer(modifier = Modifier.height(24.dp))
-                    Text(currentState.message, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center, color = Color.White)
+                    Text(
+                        text = msg,
+                        style = MaterialTheme.typography.titleMedium,
+                        textAlign = TextAlign.Center,
+                        color = Color.White
+                    )
                 }
                 is ScannerViewModel.AppState.NeedsDate -> {
                     ExpirationDatePrompt(
                         product = currentState.product,
-                        onSubmit = { date -> viewModel.confirmAction(currentState.product.id, 1, date) },
+                        estimatedPrice = currentState.estimatedPrice,
+                        onSubmit = { date -> viewModel.confirmAction(currentState.product.id, 1, date, currentState.estimatedPrice) },
                         onCancel = { viewModel.resetState() }
                     )
                 }
                 is ScannerViewModel.AppState.Success -> {
                     Text(currentState.message, style = MaterialTheme.typography.headlineMedium, color = SuccessGreen, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold)
-
                     if (currentState.stockMessage.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = currentState.stockMessage,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = Color.LightGray,
-                            textAlign = TextAlign.Center
-                        )
+                        Text(text = currentState.stockMessage, style = MaterialTheme.typography.titleMedium, color = Color.LightGray, textAlign = TextAlign.Center)
+                    }
+
+                    if (currentState.productId != null) {
+                        Spacer(modifier = Modifier.height(32.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Button(onClick = { viewModel.performQuickAction(currentState.productId, "print") }, colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DeepPurple)) { Text("Print Label", fontWeight = FontWeight.Bold) }
+                            Button(onClick = { viewModel.performQuickAction(currentState.productId, "open") }, colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DeepPurple)) { Text("Mark Opened", fontWeight = FontWeight.Bold) }
+                        }
                     }
                 }
                 is ScannerViewModel.AppState.InventoryResult -> {
-                    Text(currentState.product.name, style = MaterialTheme.typography.headlineSmall, color = Color.White, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(16.dp))
+                    val sharedPrefs = context.getSharedPreferences("GrocyPrefs", Context.MODE_PRIVATE)
+                    val rawUrl = sharedPrefs.getString("API_URL", "") ?: ""
+                    val apiToken = sharedPrefs.getString("API_TOKEN", "") ?: ""
+
+                    var safeUrl = if (rawUrl.endsWith("/")) rawUrl else "$rawUrl/"
+                    if (!safeUrl.endsWith("api/")) safeUrl += "api/"
+
+                    val pictureName = currentState.product.picture_file_name
+                    if (!pictureName.isNullOrEmpty()) {
+                        val encodedName = Base64.encodeToString(pictureName.toByteArray(), Base64.NO_WRAP)
+                        val imageUrl = "${safeUrl}files/productpictures/$encodedName"
+
+                        Text(
+                            text = currentState.product.name,
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = Color.White,
+                            textAlign = TextAlign.Center,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        AsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(imageUrl)
+                                .addHeader("GROCY-API-KEY", apiToken)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = "Product Image",
+                            modifier = Modifier
+                                .size(240.dp)
+                                .padding(bottom = 16.dp)
+                        )
+                    }
 
                     if (currentState.entries.isEmpty()) {
-                        Text("No items in stock.", color = ErrorRed, style = MaterialTheme.typography.titleMedium)
+                        Text("No items currently in stock.", color = ErrorRed, style = MaterialTheme.typography.titleMedium)
                     } else {
                         Card(colors = CardDefaults.cardColors(containerColor = DarkerHeaderPurple)) {
                             Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
@@ -549,13 +803,11 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
                                     Text("Expires", color = Color.LightGray, fontWeight = FontWeight.Bold)
                                 }
                                 HorizontalDivider(color = Color.Gray, modifier = Modifier.padding(vertical = 8.dp))
-
                                 LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp)) {
                                     items(currentState.entries) { entry ->
                                         Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                                             val amountStr = if (entry.amount % 1.0 == 0.0) entry.amount.toInt().toString() else entry.amount.toString()
                                             Text(amountStr, color = Color.White)
-
                                             val dateStr = if (entry.best_before_date == "2999-12-31" || entry.best_before_date.isNullOrEmpty()) "Never" else entry.best_before_date
                                             Text(dateStr, color = Color.White)
                                         }
@@ -565,18 +817,12 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
                         }
                     }
                     Spacer(modifier = Modifier.height(24.dp))
-                    Button(
-                        onClick = { viewModel.resetState() },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DeepPurple)
-                    ) { Text("Scan Next", fontWeight = FontWeight.Bold) }
+                    Button(onClick = { viewModel.resetState() }, colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DeepPurple)) { Text("Scan Next", fontWeight = FontWeight.Bold) }
                 }
                 is ScannerViewModel.AppState.Error -> {
                     Text(currentState.error, style = MaterialTheme.typography.titleMedium, color = ErrorRed, textAlign = TextAlign.Center)
                     Spacer(modifier = Modifier.height(24.dp))
-                    Button(
-                        onClick = { viewModel.resetState() },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DeepPurple)
-                    ) { Text("Clear Error") }
+                    Button(onClick = { viewModel.resetState() }, colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DeepPurple)) { Text("Clear Error") }
                 }
             }
         }
@@ -585,12 +831,10 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ExpirationDatePrompt(product: ProductDetails, onSubmit: (String) -> Unit, onCancel: () -> Unit) {
+fun ExpirationDatePrompt(product: ProductDetails, estimatedPrice: Double?, onSubmit: (String) -> Unit, onCancel: () -> Unit) {
     val defaultMillis = remember {
         if (product.default_best_before_days > 0) {
-            Calendar.getInstance().apply {
-                add(Calendar.DAY_OF_YEAR, product.default_best_before_days)
-            }.timeInMillis
+            Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, product.default_best_before_days) }.timeInMillis
         } else {
             System.currentTimeMillis()
         }
@@ -605,17 +849,17 @@ fun ExpirationDatePrompt(product: ProductDetails, onSubmit: (String) -> Unit, on
                 val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
                 val finalDate = datePickerState.selectedDateMillis?.let { sdf.format(Date(it)) } ?: ""
                 onSubmit(finalDate)
-            }) {
-                Text("Save to Stock")
-            }
+            }) { Text("Save to Stock") }
         },
-        dismissButton = {
-            TextButton(onClick = onCancel) { Text("Cancel") }
-        }
+        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } }
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text("Set Expiration for:", style = MaterialTheme.typography.titleSmall)
             Text(product.name, style = MaterialTheme.typography.titleLarge)
+            if (estimatedPrice != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("AI Estimated Price: $${String.format(Locale.US, "%.2f", estimatedPrice)}", style = MaterialTheme.typography.bodyMedium, color = SuccessGreen)
+            }
             Spacer(modifier = Modifier.height(8.dp))
         }
         DatePicker(state = datePickerState)
@@ -624,65 +868,59 @@ fun ExpirationDatePrompt(product: ProductDetails, onSubmit: (String) -> Unit, on
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onNavigateBack: () -> Unit) {
+fun SettingsScreen(
+    isAiEnabled: Boolean,
+    onToggleAi: (Boolean) -> Unit,
+    onLogout: () -> Unit,
+    onNavigateBack: () -> Unit
+) {
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Settings", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = Color.White
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = DarkerHeaderPurple,
-                    titleContentColor = Color.White
-                )
+                navigationIcon = { IconButton(onClick = onNavigateBack) { Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White) } },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkerHeaderPurple, titleContentColor = Color.White)
             )
         },
         containerColor = DeepPurple
     ) { paddingValues ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(16.dp),
+            modifier = Modifier.fillMaxSize().padding(paddingValues).padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Image(
-                painter = painterResource(id = R.drawable.basil_logo),
-                contentDescription = "Basil Logo",
-                modifier = Modifier.size(96.dp)
-            )
+            Image(painter = painterResource(id = R.drawable.basil_logo), contentDescription = "Basil Logo", modifier = Modifier.size(96.dp))
             Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-                text = "Basil",
-                style = MaterialTheme.typography.headlineLarge,
-                color = Color.White,
-                fontWeight = FontWeight.Bold
-            )
-
+            Text(text = "Basil", style = MaterialTheme.typography.headlineLarge, color = Color.White, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = "Version 1.0.0",
-                style = MaterialTheme.typography.titleMedium,
-                color = Color.LightGray
-            )
-
+            Text(text = "Version 1.1.0-AI", style = MaterialTheme.typography.titleMedium, color = Color.LightGray)
             Spacer(modifier = Modifier.height(32.dp))
 
-            Text(
-                text = "Created by Justin Sabourin",
-                style = MaterialTheme.typography.bodyLarge,
-                color = Color.White
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(0.8f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Enable Gemini AI", style = MaterialTheme.typography.titleMedium, color = Color.White)
+                Switch(
+                    checked = isAiEnabled,
+                    onCheckedChange = { onToggleAi(it) },
+                    colors = SwitchDefaults.colors(checkedThumbColor = SuccessGreen, checkedTrackColor = Color.LightGray)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(48.dp))
+
+            Button(
+                onClick = onLogout,
+                colors = ButtonDefaults.buttonColors(containerColor = ErrorRed, contentColor = DeepPurple),
+                modifier = Modifier.fillMaxWidth(0.8f)
+            ) {
+                Text("Logout / Disconnect", fontWeight = FontWeight.Bold)
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(text = "Created by Justin Sabourin", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
         }
     }
 }
