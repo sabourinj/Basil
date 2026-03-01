@@ -9,16 +9,12 @@ base {
 
 android {
     namespace = "com.basil.grocyscanner"
-    compileSdk {
-        version = release(36) {
-            minorApiLevel = 1
-        }
-    }
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.basil.grocyscanner"
         minSdk = 33
-        targetSdk = 36
+        targetSdk = 33
         versionCode = 1
         versionName = "1.1.0-AI"
 

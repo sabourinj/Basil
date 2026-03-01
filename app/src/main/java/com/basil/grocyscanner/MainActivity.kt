@@ -4,10 +4,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
-import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Base64
 import android.util.Log
@@ -15,7 +13,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,8 +26,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddShoppingCart
@@ -43,7 +42,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DatePickerDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
@@ -62,10 +61,12 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -75,10 +76,16 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.edit
+import androidx.core.graphics.toColorInt
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import coil.compose.AsyncImage
@@ -237,12 +244,12 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             delay(150)
 
             var isNewlyAdded = false
-            var currentProduct: ProductDetails? = null
+            var currentProduct: ProductDetails?
 
             try {
                 val response = api.getProductByBarcode(barcode)
                 currentProduct = response.product
-            } catch (e: HttpException) {
+            } catch (_: HttpException) {
                 if (_currentMode.value == AppMode.INVENTORY) {
                     _state.value = AppState.Error("Product not found.")
                     return@launch
@@ -251,7 +258,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 _state.value = AppState.Loading("Looking up product...")
                 try {
                     api.externalBarcodeLookup(barcode, true)
-                } catch (ex: Exception) {
+                } catch (_: Exception) {
                     Log.w("BasilDebug", "External lookup timeout/error.")
                 }
 
@@ -259,7 +266,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                     val newResponse = api.getProductByBarcode(barcode)
                     currentProduct = newResponse.product
                     isNewlyAdded = true
-                } catch (ex: Exception) {
+                } catch (_: Exception) {
                     _state.value = AppState.Error("Unable to identify product.\nAdd manually in Grocy.")
                     return@launch
                 }
@@ -268,7 +275,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 return@launch
             }
 
-            currentProduct?.let { product ->
+            currentProduct.let { product ->
                 if (isNewlyAdded && generativeModel != null) {
                     _state.value = AppState.Loading("Analyzing product...")
                     enrichProductWithGemini(product.id, product.name)
@@ -336,7 +343,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                         }
                         .sortedBy { it.best_before_date }
                     _state.value = AppState.InventoryResult(product, groupedEntries)
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     _state.value = AppState.Error("Failed to fetch stock entries.")
                 }
             }
@@ -425,7 +432,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = android.graphics.Color.parseColor("#422939")
+        window.statusBarColor = "#422939".toColorInt()
 
         val sharedPrefs = getSharedPreferences("GrocyPrefs", MODE_PRIVATE)
         val savedUrl = sharedPrefs.getString("API_URL", null)
@@ -463,13 +470,18 @@ class MainActivity : ComponentActivity() {
                                         if (scannedText.contains("|")) {
                                             val parts = scannedText.split("|")
                                             if (parts.size >= 2) {
-                                                sharedPrefs.edit().putString("API_URL", parts[0]).putString("API_TOKEN", parts[1]).apply()
+                                                sharedPrefs.edit {
+                                                    putString(
+                                                        "API_URL",
+                                                        parts[0]
+                                                    ).putString("API_TOKEN", parts[1])
+                                                }
                                                 currentScreen = "ai_setup"
                                             }
                                         }
                                     }
                                     "ai_setup" -> {
-                                        sharedPrefs.edit().putString("GEMINI_KEY", scannedText).apply()
+                                        sharedPrefs.edit { putString("GEMINI_KEY", scannedText) }
                                         aiEnabledState = true
                                         initializeApi(
                                             sharedPrefs.getString("API_URL", "")!!,
@@ -492,11 +504,11 @@ class MainActivity : ComponentActivity() {
                         "unconfigured" -> UnconfiguredScreen()
                         "ai_setup" -> AiSetupScreen(
                             onEnableAi = {
-                                sharedPrefs.edit().putBoolean("AI_ENABLED", true).apply()
+                                sharedPrefs.edit { putBoolean("AI_ENABLED", true) }
                                 aiEnabledState = true
                             },
                             onSkip = {
-                                sharedPrefs.edit().putBoolean("AI_ENABLED", false).apply()
+                                sharedPrefs.edit { putBoolean("AI_ENABLED", false) }
                                 aiEnabledState = false
                                 initializeApi(sharedPrefs.getString("API_URL", "")!!, sharedPrefs.getString("API_TOKEN", "")!!, null)
                                 currentScreen = "scanner"
@@ -509,7 +521,7 @@ class MainActivity : ComponentActivity() {
                             isAiEnabled = aiEnabledState,
                             onToggleAi = { enabled ->
                                 aiEnabledState = enabled
-                                sharedPrefs.edit().putBoolean("AI_ENABLED", enabled).apply()
+                                sharedPrefs.edit { putBoolean("AI_ENABLED", enabled) }
 
                                 if (enabled && sharedPrefs.getString("GEMINI_KEY", null).isNullOrBlank()) {
                                     currentScreen = "ai_setup"
@@ -522,7 +534,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             onLogout = {
-                                sharedPrefs.edit().clear().apply()
+                                sharedPrefs.edit { clear() }
                                 viewModel = null
                                 aiEnabledState = false
                                 currentScreen = "unconfigured"
@@ -575,7 +587,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
-    var step by remember { mutableStateOf(1) }
+    var step by remember { mutableIntStateOf(1) }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
@@ -655,25 +667,18 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
     val context = LocalContext.current
 
     val vibrator = remember {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
-            vibratorManager.defaultVibrator
-        } else {
-            @Suppress("DEPRECATION")
-            context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-        }
+        val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+        vibratorManager.defaultVibrator
     }
 
     LaunchedEffect(state) {
         when (state) {
             is ScannerViewModel.AppState.Success, is ScannerViewModel.AppState.InventoryResult -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
-                else @Suppress("DEPRECATION") vibrator.vibrate(200)
+                vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
             }
             is ScannerViewModel.AppState.NeedsDate, is ScannerViewModel.AppState.Error -> {
                 val pattern = longArrayOf(0, 150, 100, 150)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
-                else @Suppress("DEPRECATION") vibrator.vibrate(pattern, -1)
+                vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
             }
             else -> {}
         }
@@ -940,7 +945,12 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ExpirationDatePrompt(product: ProductDetails, estimatedPrice: Double?, onSubmit: (String) -> Unit, onCancel: () -> Unit) {
+fun ExpirationDatePrompt(
+    product: ProductDetails,
+    estimatedPrice: Double?, // Kept this in so it doesn't error out!
+    onSubmit: (String) -> Unit,
+    onCancel: () -> Unit
+) {
     val defaultMillis = remember {
         if (product.default_best_before_days > 0) {
             Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, product.default_best_before_days) }.timeInMillis
@@ -951,22 +961,68 @@ fun ExpirationDatePrompt(product: ProductDetails, estimatedPrice: Double?, onSub
 
     val datePickerState = rememberDatePickerState(initialSelectedDateMillis = defaultMillis)
 
-    DatePickerDialog(
+    Dialog(
         onDismissRequest = onCancel,
-        confirmButton = {
-            Button(onClick = {
-                val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-                val finalDate = datePickerState.selectedDateMillis?.let { sdf.format(Date(it)) } ?: ""
-                onSubmit(finalDate)
-            }) { Text("Save to Stock") }
-        },
-        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } }
+        // This disables the default massive margins, giving the dialog room to breathe
+        properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text("Set Expiration for:", style = MaterialTheme.typography.titleSmall)
-            Text(product.name, style = MaterialTheme.typography.titleLarge)
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = Color.White,
+            modifier = Modifier
+                .padding(16.dp)
+                .fillMaxWidth()
+                .wrapContentHeight() // Prevents the dialog from stretching off-screen
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("Set Expiration for:", style = MaterialTheme.typography.titleMedium, color = Color.Gray)
+                Text(product.name, style = MaterialTheme.typography.titleSmall, color = DeepPurple, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold)
+
+                val currentDensity = LocalDensity.current
+                CompositionLocalProvider(
+                    LocalDensity provides Density(
+                        density = currentDensity.density * 0.7f
+                    )
+                ) {
+                    DatePicker(
+                        state = datePickerState,
+                        title = null,
+                        headline = null,
+                        showModeToggle = false,
+                        modifier = Modifier.weight(1f, fill = false),
+                        colors = DatePickerDefaults.colors(
+                            selectedDayContainerColor = DeepPurple, // The solid circle
+                            selectedDayContentColor = Color.White,  // The text inside the circle
+                            todayContentColor = DeepPurple,         // The text for "Today" if unselected
+                            todayDateBorderColor = DeepPurple       // The outline for "Today"
+                        )
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onCancel) {
+                        Text("Cancel", color = Color.Gray)
+                    }
+                    Button(
+                        onClick = {
+                            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+                            val finalDate = datePickerState.selectedDateMillis?.let { sdf.format(Date(it)) } ?: ""
+                            onSubmit(finalDate)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = DeepPurple, contentColor = Color.White)
+                    ) {
+                        Text("Save to Stock", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
-        DatePicker(state = datePickerState)
     }
 }
 
