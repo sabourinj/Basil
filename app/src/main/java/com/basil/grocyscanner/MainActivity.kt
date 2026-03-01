@@ -15,14 +15,60 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AddShoppingCart
+import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.TakeoutDining
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -52,9 +98,16 @@ import org.json.JSONObject
 import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
-import retrofit2.http.*
+import retrofit2.http.Body
+import retrofit2.http.GET
+import retrofit2.http.POST
+import retrofit2.http.PUT
+import retrofit2.http.Path
+import retrofit2.http.Query
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 // --- BRANDING COLORS ---
@@ -93,7 +146,7 @@ interface GrocyApi {
     @POST("stock/products/{productId}/open")
     suspend fun openStock(@Path("productId") productId: Int, @Body request: OpenStockRequest)
 
-    @POST("stock/products/{productId}/printlabel")
+    @GET("stock/products/{productId}/printlabel")
     suspend fun printLabel(@Path("productId") productId: Int)
 
     @GET("stock/barcodes/external-lookup/{barcode}")
@@ -121,7 +174,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         object Idle : AppState()
         data class Loading(val message: String = "Communicating with Grocy...") : AppState()
         data class NeedsDate(val product: ProductDetails, val estimatedPrice: Double? = null) : AppState()
-        data class Success(val message: String, val stockMessage: String = "", val productId: Int? = null) : AppState()
+        data class Success(val message: String, val stockMessage: String = "", val productId: Int? = null, val currentStock: Double = 0.0) : AppState()
         data class Error(val error: String) : AppState()
         data class InventoryResult(val product: ProductDetails, val entries: List<StockEntry>) : AppState()
     }
@@ -138,9 +191,12 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
     private val generativeModel by lazy {
         geminiApiKey?.let {
             GenerativeModel(
-                modelName = "gemini-2.5-flash",
+                modelName = "gemini-2.5-flash-lite",
                 apiKey = it,
-                generationConfig = generationConfig { responseMimeType = "application/json" }
+                generationConfig = generationConfig {
+                    responseMimeType = "application/json"
+                    temperature = 0.0f
+                }
             )
         }
     }
@@ -188,11 +244,11 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 currentProduct = response.product
             } catch (e: HttpException) {
                 if (_currentMode.value == AppMode.INVENTORY) {
-                    _state.value = AppState.Error("Product not found in database.")
+                    _state.value = AppState.Error("Product not found.")
                     return@launch
                 }
 
-                _state.value = AppState.Loading("Looking up new product info...")
+                _state.value = AppState.Loading("Looking up product...")
                 try {
                     api.externalBarcodeLookup(barcode, true)
                 } catch (ex: Exception) {
@@ -204,7 +260,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                     currentProduct = newResponse.product
                     isNewlyAdded = true
                 } catch (ex: Exception) {
-                    _state.value = AppState.Error("Unable to identify new product.\nAdd manually in Grocy.")
+                    _state.value = AppState.Error("Unable to identify product.\nAdd manually in Grocy.")
                     return@launch
                 }
             } catch (e: Exception) {
@@ -214,7 +270,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
 
             currentProduct?.let { product ->
                 if (isNewlyAdded && generativeModel != null) {
-                    _state.value = AppState.Loading("Enriching product data...")
+                    _state.value = AppState.Loading("Analyzing product...")
                     enrichProductWithGemini(product.id, product.name)
                 }
                 processFoundProduct(product)
@@ -326,8 +382,9 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
 
                 _state.value = AppState.Success(
                     message = "Success!",
-                    stockMessage = "Remaining Stock: $stockStr",
-                    productId = productId
+                    stockMessage = "${if (_currentMode.value == AppMode.PURCHASE) "New stock level" else "Remaining stock"}: $stockStr",
+                    productId = productId,
+                    currentStock = remaining
                 )
 
                 delay(6000)
@@ -535,7 +592,7 @@ fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
 
             Text("Enable AI Features?", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(16.dp))
-            Text("Basil can use Google Gemini to automatically estimate expiration rules, predict prices, and organize new products into your database categories.", textAlign = TextAlign.Center, color = Color.LightGray)
+            Text("Basil can use Google Gemini to estimate expiration rules, predict prices, and organize new products into your categories.", textAlign = TextAlign.Center, color = Color.LightGray)
             Spacer(modifier = Modifier.height(32.dp))
 
             Button(onClick = {
@@ -556,7 +613,7 @@ fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
             Spacer(modifier = Modifier.height(24.dp))
             Text("Scan Gemini Key", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(16.dp))
-            Text("Create an API Key in Google AI Studio, generate a QR code for it, and scan it now with your PDA.", textAlign = TextAlign.Center, color = Color.LightGray)
+            Text("1. Create an API Key\nin Google AI Studio.\n\n2. Generate a QR code\ncontaining only the key.\n\n3.Scan the QR Code now.", textAlign = TextAlign.Left, color = Color.LightGray)
         }
     }
 }
@@ -566,7 +623,7 @@ fun UnconfiguredScreen() {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Image(painter = painterResource(id = R.drawable.basil_logo), contentDescription = "Basil Logo", modifier = Modifier.size(80.dp))
         Spacer(modifier = Modifier.height(24.dp))
-        Text("Configuration Required", style = MaterialTheme.typography.headlineMedium, color = Color.White)
+        Text("Grocy Login Required", style = MaterialTheme.typography.headlineMedium, color = Color.White)
         Spacer(modifier = Modifier.height(16.dp))
         Text("1. Generate an API Key in Grocy.\n2. Click the Show QR Code button.\n3. Scan the QR code displayed.", textAlign = TextAlign.Left, color = Color.LightGray)
     }
@@ -577,7 +634,7 @@ fun RowScope.ModeButton(title: String, isSelected: Boolean, onClick: () -> Unit)
     if (isSelected) {
         Button(
             onClick = onClick, modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DeepPurple),
+            colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = DeepPurple),
             contentPadding = PaddingValues(0.dp)
         ) { Text(title, fontWeight = FontWeight.Bold, maxLines = 1) }
     } else {
@@ -699,7 +756,7 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
                 }
                 is ScannerViewModel.AppState.Loading -> {
                     val msg = currentState.message
-                    val isAiAction = msg.contains("Enriching", ignoreCase = true) || msg.contains("Estimating", ignoreCase = true)
+                    val isAiAction = msg.contains("Analyzing", ignoreCase = true) || msg.contains("Estimating", ignoreCase = true)
                     val isLookupAction = msg.contains("Looking up", ignoreCase = true)
 
                     if (isAiAction) {
@@ -748,12 +805,63 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(text = currentState.stockMessage, style = MaterialTheme.typography.titleMedium, color = Color.LightGray, textAlign = TextAlign.Center)
                     }
-
-                    if (currentState.productId != null) {
+                    if (currentState.productId != null && currentState.currentStock > 0.0) {
                         Spacer(modifier = Modifier.height(32.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Button(onClick = { viewModel.performQuickAction(currentState.productId, "print") }, colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DeepPurple)) { Text("Print Label", fontWeight = FontWeight.Bold) }
-                            Button(onClick = { viewModel.performQuickAction(currentState.productId, "open") }, colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DeepPurple)) { Text("Mark Opened", fontWeight = FontWeight.Bold) }
+                        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                            FilledIconButton(
+                                onClick = { viewModel.performQuickAction(currentState.productId, "print") },
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = Color.White,
+                                    contentColor = DeepPurple
+                                ),
+                                modifier = Modifier.size(64.dp) // Nice, large tap target for a PDA
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Print,
+                                    contentDescription = "Print Label",
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+                            FilledIconButton(
+                                onClick = { viewModel.performQuickAction(currentState.productId, "open") },
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = Color.White,
+                                    contentColor = DeepPurple
+                                ),
+                                modifier = Modifier.size(64.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.TakeoutDining,
+                                    contentDescription = "Mark Opened",
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+
+                        }
+                    }
+                    // Only show this when product exists but stock is 0
+                    if (currentState.productId != null && currentState.currentStock <= 0.0) {
+                        Spacer(modifier = Modifier.height(32.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+
+                            // Future "Add to Shopping List" Button
+                            FilledIconButton(
+                                onClick = { /* Future: api.addToShoppingList(productId) */ },
+                                enabled = false, // This makes it look grayed out/disabled
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = Color.White.copy(alpha = 0.3f), // Faded background
+                                    contentColor = Color.LightGray,
+                                    disabledContainerColor = Color.White.copy(alpha = 0.1f),
+                                    disabledContentColor = Color.Gray
+                                ),
+                                modifier = Modifier.size(64.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AddShoppingCart,
+                                    contentDescription = "Add to Shopping List (Coming Soon)",
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -767,7 +875,7 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
                         fontWeight = FontWeight.Bold
                     )
 
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     val sharedPrefs = context.getSharedPreferences("GrocyPrefs", Context.MODE_PRIVATE)
                     val rawUrl = sharedPrefs.getString("API_URL", "") ?: ""
@@ -790,9 +898,11 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
                             contentDescription = "Product Image",
                             modifier = Modifier
                                 .size(120.dp)
-                                .padding(bottom = 8.dp)
+                                //.border(2.dp, Color.Red) // for positioning debugging!
                         )
                     }
+
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     if (currentState.entries.isEmpty()) {
                         Text("No items currently in stock.", color = ErrorRed, style = MaterialTheme.typography.titleMedium)
@@ -817,8 +927,6 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
                             }
                         }
                     }
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Button(onClick = { viewModel.resetState() }, colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DeepPurple)) { Text("Scan Next", fontWeight = FontWeight.Bold) }
                 }
                 is ScannerViewModel.AppState.Error -> {
                     Text(currentState.error, style = MaterialTheme.typography.titleMedium, color = ErrorRed, textAlign = TextAlign.Center)
@@ -857,11 +965,6 @@ fun ExpirationDatePrompt(product: ProductDetails, estimatedPrice: Double?, onSub
         Column(modifier = Modifier.padding(16.dp)) {
             Text("Set Expiration for:", style = MaterialTheme.typography.titleSmall)
             Text(product.name, style = MaterialTheme.typography.titleLarge)
-            if (estimatedPrice != null) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text("AI Estimated Price: $${String.format(Locale.US, "%.2f", estimatedPrice)}", style = MaterialTheme.typography.bodyMedium, color = SuccessGreen)
-            }
-            Spacer(modifier = Modifier.height(8.dp))
         }
         DatePicker(state = datePickerState)
     }
@@ -906,7 +1009,7 @@ fun SettingsScreen(
                 Switch(
                     checked = isAiEnabled,
                     onCheckedChange = { onToggleAi(it) },
-                    colors = SwitchDefaults.colors(checkedThumbColor = SuccessGreen, checkedTrackColor = Color.LightGray)
+                    colors = SwitchDefaults.colors(checkedThumbColor = DeepPurple, checkedTrackColor = Color.LightGray)
                 )
             }
 
