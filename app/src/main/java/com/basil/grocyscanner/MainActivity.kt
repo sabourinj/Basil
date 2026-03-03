@@ -638,7 +638,7 @@ fun UnconfiguredScreen() {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Image(painter = painterResource(id = R.drawable.basil_logo), contentDescription = "Basil Logo", modifier = Modifier.size(80.dp))
         Spacer(modifier = Modifier.height(24.dp))
-        Text("Grocy Login Required", style = MaterialTheme.typography.headlineMedium, color = Color.White)
+        Text("Grocy Login Required", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(16.dp))
         Text("1. Generate an API Key in Grocy.\n2. Click the Show QR Code button.\n3. Scan the QR code displayed.", textAlign = TextAlign.Left, color = Color.LightGray)
     }
@@ -692,12 +692,12 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
             TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Basil", fontWeight = FontWeight.Bold)
                         Image(
                             painter = painterResource(id = R.drawable.basil_logo),
                             contentDescription = "Basil Logo",
-                            modifier = Modifier.size(36.dp).padding(end = 12.dp)
+                            modifier = Modifier.size(36.dp).padding(start = 8.dp, bottom = 2.dp)
                         )
-                        Text("Basil", fontWeight = FontWeight.Bold)
                     }
                 },
                 actions = {
