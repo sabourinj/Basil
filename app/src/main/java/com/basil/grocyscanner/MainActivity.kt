@@ -112,6 +112,9 @@ import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
 import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.time.format.TextStyle
+import java.time.temporal.ChronoUnit
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
@@ -902,7 +905,9 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
                                 .build(),
                             contentDescription = "Product Image",
                             modifier = Modifier
-                                .size(120.dp)
+                                .fillMaxWidth(0.85f)
+                                .weight(1f, fill = false)
+                                .padding(vertical = 16.dp)
                                 //.border(2.dp, Color.Red) // for positioning debugging!
                         )
                     }
@@ -912,20 +917,53 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
                     if (currentState.entries.isEmpty()) {
                         Text("No items currently in stock.", color = ErrorRed, style = MaterialTheme.typography.titleMedium)
                     } else {
-                        Card(colors = CardDefaults.cardColors(containerColor = DarkerHeaderPurple)) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = DarkerHeaderPurple),
+                            modifier = Modifier.fillMaxWidth(0.85f)
+                        ) {
                             Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Text("Amount", color = Color.LightGray, fontWeight = FontWeight.Bold)
                                     Text("Expires", color = Color.LightGray, fontWeight = FontWeight.Bold)
                                 }
                                 HorizontalDivider(color = Color.Gray, modifier = Modifier.padding(vertical = 8.dp))
+
                                 LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp)) {
                                     items(currentState.entries) { entry ->
-                                        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
                                             val amountStr = if (entry.amount % 1.0 == 0.0) entry.amount.toInt().toString() else entry.amount.toString()
                                             Text(amountStr, color = Color.White)
-                                            val dateStr = if (entry.best_before_date == "2999-12-31" || entry.best_before_date.isNullOrEmpty()) "Never" else entry.best_before_date
-                                            Text(dateStr, color = Color.White)
+
+                                            val dateStr = remember(entry.best_before_date) {
+                                                if (entry.best_before_date == "2999-12-31" || entry.best_before_date.isNullOrEmpty()) {
+                                                    "Never"
+                                                } else {
+                                                    try {
+                                                        val expireDate = LocalDate.parse(entry.best_before_date)
+                                                        val today = LocalDate.now()
+                                                        val daysBetween = ChronoUnit.DAYS.between(today, expireDate)
+
+                                                        when {
+                                                            daysBetween == 0L -> "Today"
+                                                            daysBetween == 1L -> "Tomorrow"
+                                                            daysBetween in 2..6 -> expireDate.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.getDefault())
+                                                            daysBetween < 0 -> {
+                                                                val daysPast = -daysBetween
+                                                                "Expired $daysPast day${if (daysPast != 1L) "s" else ""} ago"
+                                                            }
+                                                            else -> entry.best_before_date
+                                                        }
+                                                    } catch (e: Exception) {
+                                                        entry.best_before_date
+                                                    }
+                                                }
+                                            }
+
+                                            val dateColor = if (dateStr.startsWith("Expired")) ErrorRed else Color.White
+                                            Text(text = dateStr, color = dateColor)
                                         }
                                     }
                                 }
