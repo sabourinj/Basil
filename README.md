@@ -44,16 +44,18 @@
 ## 🛠 Setup & Configuration
 
 ### 1. The "Magic" QR Code
-Basil uses a zero-config setup. Generate a QR code (using any generator) with your Grocy URL and API Key separated by a pipe (`|`):
-`https://grocy.yourdomain.com/api|your_secret_api_key_here`
+Basil uses a zero-config setup. Generate an API key in Grocy and show the QR code to scan in Basil.
+*You could also generate your own if desired using format: Grocy URL and API Key separated by a pipe* (`|`): `https://grocy.yourdomain.com/api|your_secret_api_key_here`
 
-Scan this inside the app to instantly link your device.
+💡 In environments where you may share the scanner device with multiple people, it may be desireable to create a "Basil" Grocy user for the device and create hte API key inside that user account. Thus the journals will show "Basil" or the name of your chosing vs. an indiviuals name who may not have been using the shared device.
 
 ### 2. Scanner Intent Configuration
-For the hardware buttons to work, configure your PDA's "Scanner" or "DataWedge" app:
+For the hardware buttons to work, configure your PDA's "Scanner" or "DataWedge" to output the following:
 * **Intent Action:** `com.basil.grocyscanner.SCAN`
 * **Intent Delivery:** `Broadcast Intent`
-* **String Extra:** `barcode_data`
+* **String Extra:** `barcode_data` *Output the complete UPC including check digit. NO spaces or other formatting prefix/suffix.*
+
+💡 You may want to disable other types of barcode formats to eliminate 'false scans'. However, if you are using Grocycode or custom printed Datamatrix/QR Code labels, make sure those are not disabled. Basil can process them!
 
 ---
 
