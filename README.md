@@ -35,7 +35,7 @@
 ### Workflow Modes
 | Purchase Scan | Purchase Success | Inventory Example 1| Inventory Example 2 |
 |:---:|:---:|:---:|:---:|
-| <img alt="Ready to scan barcodes" src="https://github.com/user-attachments/assets/2b56760b-cc58-4f91-a221-52290805775a" width="200" /> | <img alt="Confirmation of added stock" src="https://github.com/user-attachments/assets/8efddf0a-d27b-4bfe-a687-2ab9ba63ee4e" width="200" /> | <img alt="Inventory-MacCheese" src="https://github.com/user-attachments/assets/f31e5e78-abaf-499b-b3a4-d599204d71a5" width="200" /> | <img alt="Inventory-Bread" src="https://github.com/user-attachments/assets/70bae329-1890-4d60-9b5d-7425168aaf7b" width="200" /> |
+| <img alt="Ready to scan barcodes" src="https://github.com/user-attachments/assets/ac84abea-4039-4e66-a35c-9d33cb034e0c" width="200" /> | <img alt="Confirmation of added stock" src="https://github.com/user-attachments/assets/eb144846-a442-47cb-9328-a3be55a993e1" width="200" /> | <img alt="Inventory-MacCheese" src="https://github.com/user-attachments/assets/5c87a7bb-36ac-4f3d-966f-15098fd652cb" width="200" /> | <img alt="Inventory-Bread" src="https://github.com/user-attachments/assets/eb1d56ba-42f2-449b-bc76-fac90835a249" width="200" /> |
 
 ---
 
