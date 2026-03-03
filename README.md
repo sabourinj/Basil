@@ -1,25 +1,27 @@
 # Basil <img width="32" alt="basil_logo" src="https://github.com/user-attachments/assets/d08b078c-a572-430e-9b5a-a40157d0da66" />
 ### *A high-performance Grocy client for Android devices with native barcode scanner.*
 
-**Basil** is a purpose-built inventory management application designed specifically for dedicated Android Barcode PDAs. While the official Grocy web interface is powerful, it can be cumbersome on small, industrial screens. By leveraging **Hardware Scanner Intents**, the app doesn't need to initialize a camera or manage autofocus. It listens at the OS level, processes the API logic in the background, and provides immediate haptic feedback so you can keep your eyes on the physical stock.
+**Basil** is an inventory management front-end for Grocy designed specifically for dedicated Android devices equipped with barcode reader hardware. While the official Grocy web interface is powerful, it can be cumbersome on small, industrial screens. By leveraging hardware scanner intents, the app doesn't need to initialize a camera or isolate rogue input from a keyboard or bluetooth device. It listens at the OS level, calls the Grocy API in realtime, and provides haptic feedback so you can keep your eyes on the physical stock.
 
 ---
 
 ## ✨ Key Features
 
 ### 🛒 On-Device Selectable Workflow
-* **Purchase Mode:** Quickly add items to your stock. Basil intelligently checks the product's Grocy category—it only prompts for an expiration date if the category requires it or if a default shelf-life isn't set.
-* **Consume Mode:** Scan to remove. Basil follows your Grocy instance's transaction logic to ensure your virtual inventory matches the physical reality.
-* **Inventory Lookup:** Instantly view a detailed breakdown of every batch currently in stock, including specific expiration dates and quantities for each.
+* **Purchase Mode:** Quickly add items to your stock. Basil intelligently checks the product's Grocy product and only prompts for an expiration date if the item requires it or if a default shelf-life isn't set. A one-tap label print option is displayed after adding to stock.
+* **Consume Mode:** Simply scan to remove from stock. Basil follows your Grocy instance's transaction logic to ensure virtual inventory matches physical reality.
+* **Inventory Lookup:** Instantly view a details of items in stock including specific expiration dates and quantities for each.
 
 ### 🔍 Intelligent Product Resolution
-* **Local-First:** Basil first checks your Grocy database for the barcode.
-* **Global Fallback:** If unknown, it triggers a background sync with **OpenFoodFacts** via Grocy's external lookup API.
-* **Smart Defaults:** Newly discovered items are automatically assigned to your user's **Default Location** (configured in Grocy User Settings), preventing the "Missing Location" errors common in other apps.
+* **Grocy-First:** Basil first checks your Grocy database for the barcode.
+* **OpenFoodFacts-Fallback:** If unknown, it triggers a lookup with **OpenFoodFacts** via Grocy's API.
+* **User Defaults:** Newly discovered items are automatically assigned to the Default Location (configured in Grocy User Settings of the user the API key is associated with), preventing the "Missing Location" errors common in other apps.
+* **Gemini AI Enrichment:** If enabled, Gemini AI can determine estimated item cost, due dates, and storage location based upon the product name identified.
 
 ### 📱 Industrial Design
-* **Deep Purple UI:** High-contrast, dark-themed interface designed to reduce eye strain and look sleek on industrial displays.
-* **Haptic Language:** * *Short Pulse:* Success / Scan Accepted.
+* **Deep Purple UI:** High-contrast, dark-themed interface designed to elimninate need for light/dark selection, reduce visual strain, and look sleek on industrial displays.
+* **Haptic Language:**
+    * *Short Pulse:* Success / Scan Accepted.
     * *Double Pulse:* Error / Item Not Found.
     * *Triple Pulse:* Input Required (e.g., Expiration Date needed).
 
@@ -67,7 +69,7 @@ Basil is built using modern Android standards to ensure long-term maintainabilit
 * **Architecture:** MVVM (Model-View-ViewModel)
 
 ### API Implementation
-Basil communicates with the Grocy REST API. Key endpoints include:
+Basil communicates with the <a href="https://demo.grocy.info/api">Grocy REST API</a>. Key endpoints include:
 * `/stock/products/by-barcode/{barcode}`: Primary resolution.
 * `/stock/barcodes/external-lookup/{barcode}?add=true`: The "magic" auto-add trigger.
 * `/stock/products/{productId}/entries`: Powers the Inventory table.
@@ -87,4 +89,4 @@ Basil is open-source because the self-hosting community thrives on shared tools.
 Distributed under the **MIT License**. See `LICENSE` for more information.
 
 ---
-*Developed with ❤️ in Massachusetts by Justin Sabourin for the Grocy Community.*
+*Developed with ❤️ in Massachusetts by Justin Sabourin for the <a href="https://grocy.info/">Grocy Community</a>.*
