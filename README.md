@@ -1,5 +1,5 @@
 # 🌿 Basil
-### *A high-performance, native Grocy client for Android PDAs.*
+### *A high-performance Grocy client for Android devices with native barcode scanner.*
 
 **Basil** is a purpose-built inventory management application designed specifically for dedicated Android Barcode PDAs (like those from Zebra, Chainway, or Munich). While the official Grocy web interface is powerful, it can be cumbersome on small, industrial screens. Basil solves this by providing a "Headless-Ready," high-contrast, and lightning-fast scanning experience.
 
@@ -78,4 +78,4 @@ Basil is open-source because the self-hosting community thrives on shared tools.
 Distributed under the **MIT License**. See `LICENSE` for more information.
 
 ---
-*Developed with ❤️ by Justin P. Sabourin for the Grocy Community.*
+*Developed with ❤️ in Massachusetts by Justin Sabourin for the Grocy Community.*
