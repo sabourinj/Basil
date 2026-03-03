@@ -1,21 +1,16 @@
-# 🌿 Basil
+# Basil <img width="32" alt="basil_logo" src="https://github.com/user-attachments/assets/d08b078c-a572-430e-9b5a-a40157d0da66" />
 ### *A high-performance Grocy client for Android devices with native barcode scanner.*
 
-**Basil** is a purpose-built inventory management application designed specifically for dedicated Android Barcode PDAs (like those from Zebra, Chainway, or Munich). While the official Grocy web interface is powerful, it can be cumbersome on small, industrial screens. Basil solves this by providing a "Headless-Ready," high-contrast, and lightning-fast scanning experience.
+**Basil** is a purpose-built inventory management application designed specifically for dedicated Android Barcode PDAs. While the official Grocy web interface is powerful, it can be cumbersome on small, industrial screens. By leveraging **Hardware Scanner Intents**, the app doesn't need to initialize a camera or manage autofocus. It listens at the OS level, processes the API logic in the background, and provides immediate haptic feedback so you can keep your eyes on the physical stock.
 
 ---
 
-## 📖 Overview
-Basil turns your PDA into a professional-grade warehouse tool. It is designed for speed, reliability, and one-handed operation in your pantry or kitchen. 
-
-By leveraging **Hardware Scanner Intents**, the app doesn't need to initialize a camera or manage autofocus. It listens at the OS level, processes the API logic in the background, and provides immediate haptic feedback so you can keep your eyes on the physical stock.
-
 ## ✨ Key Features
 
-### 🛒 Multi-Mode Workflow
+### 🛒 On-Device Selectable Workflow
 * **Purchase Mode:** Quickly add items to your stock. Basil intelligently checks the product's Grocy category—it only prompts for an expiration date if the category requires it or if a default shelf-life isn't set.
-* **Consume Mode:** Scan to remove. Basil follows your Grocy instance's transaction logic (typically FIFO) to ensure your virtual inventory matches the physical reality.
--   **Inventory Lookup:** Instantly view a detailed breakdown of every batch currently in stock, including specific expiration dates and quantities for each.
+* **Consume Mode:** Scan to remove. Basil follows your Grocy instance's transaction logic to ensure your virtual inventory matches the physical reality.
+* **Inventory Lookup:** Instantly view a detailed breakdown of every batch currently in stock, including specific expiration dates and quantities for each.
 
 ### 🔍 Intelligent Product Resolution
 * **Local-First:** Basil first checks your Grocy database for the barcode.
@@ -27,6 +22,20 @@ By leveraging **Hardware Scanner Intents**, the app doesn't need to initialize a
 * **Haptic Language:** * *Short Pulse:* Success / Scan Accepted.
     * *Double Pulse:* Error / Item Not Found.
     * *Triple Pulse:* Input Required (e.g., Expiration Date needed).
+
+---
+
+## 🖼️ Screenshots
+
+### Setup & AI Configuration
+| Grocy Integration | Gemini Configuration | Settings |
+|:---:|:---:|:---:|
+| <img alt="Scanning the Grocy API Key" src="https://github.com/user-attachments/assets/58426d39-e764-418d-922c-a3f9a4d04914" width="200" /> | <img alt="Opt-in for Gemini features" src="https://github.com/user-attachments/assets/786399c3-a4b9-4bbc-82e0-ca11e1b08359" width="200" /> <img alt="Scanning the Gemini API Key" src="https://github.com/user-attachments/assets/2b87f5b3-89ed-426a-9562-8d98c25af5f9" width="200" /> | <img alt="Settings & About" src="https://github.com/user-attachments/assets/2d810aa6-7570-47b8-aafd-0d2dc0ae6fdd" width="200" /> |
+
+### Workflow Modes
+| Purchase Mode | Inventory Lookup |
+|:---:|:---:|
+| <img alt="Ready to scan barcodes" src="https://github.com/user-attachments/assets/2b56760b-cc58-4f91-a221-52290805775a" width="200" /> <img alt="Confirmation of added stock" src="https://github.com/user-attachments/assets/8efddf0a-d27b-4bfe-a687-2ab9ba63ee4e" width="200" /> | <img alt="Inventory-MacCheese" src="https://github.com/user-attachments/assets/f31e5e78-abaf-499b-b3a4-d599204d71a5" width="200" /> <img alt="Inventory-Bread" src="https://github.com/user-attachments/assets/70bae329-1890-4d60-9b5d-7425168aaf7b" width="200" /> |
 
 ---
 
