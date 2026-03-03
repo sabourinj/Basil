@@ -28,14 +28,14 @@
 ## 🖼️ Screenshots
 
 ### Setup & AI Configuration
-| Grocy Integration | Gemini Configuration | Settings |
-|:---:|:---:|:---:|
-| <img alt="Scanning the Grocy API Key" src="https://github.com/user-attachments/assets/58426d39-e764-418d-922c-a3f9a4d04914" width="200" /> | <img alt="Opt-in for Gemini features" src="https://github.com/user-attachments/assets/786399c3-a4b9-4bbc-82e0-ca11e1b08359" width="200" /> <img alt="Scanning the Gemini API Key" src="https://github.com/user-attachments/assets/2b87f5b3-89ed-426a-9562-8d98c25af5f9" width="200" /> | <img alt="Settings & About" src="https://github.com/user-attachments/assets/2d810aa6-7570-47b8-aafd-0d2dc0ae6fdd" width="200" /> |
+| Grocy Config | Gemini Enable | Gemini Config | Settings |
+|:---:|:---:|:---:|:---:|
+| <img alt="Scanning the Grocy API Key" src="https://github.com/user-attachments/assets/58426d39-e764-418d-922c-a3f9a4d04914" width="200" /> | <img alt="Opt-in for Gemini features" src="https://github.com/user-attachments/assets/786399c3-a4b9-4bbc-82e0-ca11e1b08359" width="200" /> | <img alt="Scanning the Gemini API Key" src="https://github.com/user-attachments/assets/2b87f5b3-89ed-426a-9562-8d98c25af5f9" width="200" /> | <img alt="Settings & About" src="https://github.com/user-attachments/assets/2d810aa6-7570-47b8-aafd-0d2dc0ae6fdd" width="200" /> |
 
 ### Workflow Modes
-| Purchase Mode | Inventory Lookup |
-|:---:|:---:|
-| <img alt="Ready to scan barcodes" src="https://github.com/user-attachments/assets/2b56760b-cc58-4f91-a221-52290805775a" width="200" /> <img alt="Confirmation of added stock" src="https://github.com/user-attachments/assets/8efddf0a-d27b-4bfe-a687-2ab9ba63ee4e" width="200" /> | <img alt="Inventory-MacCheese" src="https://github.com/user-attachments/assets/f31e5e78-abaf-499b-b3a4-d599204d71a5" width="200" /> <img alt="Inventory-Bread" src="https://github.com/user-attachments/assets/70bae329-1890-4d60-9b5d-7425168aaf7b" width="200" /> |
+| Purchase Scan | Purchase Success | Inventory Example 1| Inventory Example 2 |
+|:---:|:---:|:---:|:---:|
+| <img alt="Ready to scan barcodes" src="https://github.com/user-attachments/assets/ac84abea-4039-4e66-a35c-9d33cb034e0c" width="200" /> | <img alt="Confirmation of added stock" src="https://github.com/user-attachments/assets/eb144846-a442-47cb-9328-a3be55a993e1" width="200" /> | <img alt="Inventory-MacCheese" src="https://github.com/user-attachments/assets/5c87a7bb-36ac-4f3d-966f-15098fd652cb" width="200" /> | <img alt="Inventory-Bread" src="https://github.com/user-attachments/assets/eb1d56ba-42f2-449b-bc76-fac90835a249" width="200" /> |
 
 ---
 
