@@ -1,7 +1,7 @@
 # Basil <img width="32" alt="basil_logo" src="https://github.com/user-attachments/assets/d08b078c-a572-430e-9b5a-a40157d0da66" />
 ### *A high-performance Grocy client for Android devices with native barcode scanner.*
 
-**Basil** is a purpose-built inventory management application designed specifically for dedicated Android Barcode PDAs. While the official Grocy web interface is powerful, it can be cumbersome on small, industrial screens. By leveraging **Hardware Scanner Intents**, the app doesn't need to initialize a camera or manage autofocus. It listens at the OS level, processes the API logic in the background, and provides immediate haptic feedback so you can keep your eyes on the physical stock.
+**Basil** is an inventory management front-end for Grocy designed specifically for dedicated Android devices equipped with barcode reader hardware. While the official Grocy web interface is powerful, it can be cumbersome on small, industrial screens. By leveraging **Hardware Scanner Intents**, the app doesn't need to initialize a camera or manage autofocus. It listens at the OS level, processes the API logic in the background, and provides immediate haptic feedback so you can keep your eyes on the physical stock.
 
 ---
 
