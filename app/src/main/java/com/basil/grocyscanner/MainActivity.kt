@@ -21,12 +21,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.core.content.edit
 import androidx.core.graphics.toColorInt
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.basil.grocyscanner.data.GrocyApi
 import com.basil.grocyscanner.ui.AiSetupScreen
 import com.basil.grocyscanner.ui.GrocyScannerApp
@@ -53,9 +55,12 @@ class MainActivity : ComponentActivity() {
                 "#422939".toColorInt()
             )
         )
+        val windowInsetsController = WindowCompat.getInsetsController(window, window.decorView)
+        windowInsetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        windowInsetsController.hide(WindowInsetsCompat.Type.navigationBars())
         super.onCreate(savedInstanceState)
 
-        val sharedPrefs = getSharedPreferences("GrocyPrefs", MODE_PRIVATE)
+        val sharedPrefs = com.basil.grocyscanner.data.SecurePrefs.get(this)
         val savedUrl = sharedPrefs.getString("API_URL", null)
         val savedToken = sharedPrefs.getString("API_TOKEN", null)
         val geminiKey = sharedPrefs.getString("GEMINI_KEY", null)

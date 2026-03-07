@@ -51,7 +51,7 @@ fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.Inve
 
     Spacer(modifier = Modifier.height(8.dp))
 
-    val sharedPrefs = context.getSharedPreferences("GrocyPrefs", Context.MODE_PRIVATE)
+    val sharedPrefs = com.basil.grocyscanner.data.SecurePrefs.get(context)
     val rawUrl = sharedPrefs.getString("API_URL", "") ?: ""
     val apiToken = sharedPrefs.getString("API_TOKEN", "") ?: ""
 
