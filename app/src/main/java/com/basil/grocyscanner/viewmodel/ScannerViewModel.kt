@@ -91,15 +91,17 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         lastScanTime = currentTime
 
         viewModelScope.launch {
-            _state.value = AppState.Loading("Identifying barcode...")
+            _state.value = AppState.Loading("Identifying product...")
             delay(150)
 
             var isNewlyAdded = false
-            var currentProduct: ProductDetails?
+            var currentProduct: ProductDetails? = null
+            var knownPrice: Double? = null
 
             try {
                 val response = api.getProductByBarcode(barcode)
                 currentProduct = response.product
+                knownPrice = response.last_price ?: response.product.default_price
             } catch (_: HttpException) {
                 if (_currentMode.value == AppMode.INVENTORY) {
                     _state.value = AppState.Error("Product not found.")
@@ -116,6 +118,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 try {
                     val newResponse = api.getProductByBarcode(barcode)
                     currentProduct = newResponse.product
+                    knownPrice = newResponse.last_price ?: newResponse.product.default_price
                     isNewlyAdded = true
                 } catch (_: Exception) {
                     _state.value = AppState.Error("Unable to identify product.\nAdd manually in Grocy.")
@@ -126,12 +129,12 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 return@launch
             }
 
-            currentProduct.let { product ->
+            currentProduct?.let { product ->
                 if (isNewlyAdded && generativeModel != null) {
                     _state.value = AppState.Loading("Analyzing product...")
                     enrichProductWithGemini(product.id, product.name)
                 }
-                processFoundProduct(product)
+                processFoundProduct(product, knownPrice)
             }
         }
     }
@@ -177,11 +180,11 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         }
     }
 
-    private suspend fun processFoundProduct(product: ProductDetails) {
+    private suspend fun processFoundProduct(product: ProductDetails, knownPrice: Double? = null) {
         when (_currentMode.value) {
             AppMode.INVENTORY -> {
                 try {
-                    _state.value = AppState.Loading("Fetching inventory data...")
+                    _state.value = AppState.Loading("Checking inventory data...")
                     val rawEntries = api.getStockEntries(product.id)
                     val groupedEntries = rawEntries
                         .groupBy { if (it.best_before_date.isNullOrBlank()) "2999-12-31" else it.best_before_date }
@@ -200,18 +203,20 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             }
             AppMode.CONSUME -> confirmAction(product.id, 1, null, null)
             AppMode.PURCHASE -> {
-                var estimatedPrice: Double? = null
+                var estimatedPrice: Double? = knownPrice
 
-                if (generativeModel != null) {
-                    _state.value = AppState.Loading("Estimating price...")
-                    try {
-                        val pricePrompt = "Estimate the current USD price of '${product.name}'. Return a JSON object with a single key 'price' containing a float value."
-                        val response = generativeModel?.generateContent(pricePrompt)
-                        response?.text?.let { jsonStr ->
-                            estimatedPrice = JSONObject(jsonStr).optDouble("price", 0.0).takeIf { it > 0.0 }
+                if (estimatedPrice == null || estimatedPrice <= 0.0) {
+                    if (generativeModel != null) {
+                        _state.value = AppState.Loading("Estimating price...")
+                        try {
+                            val pricePrompt = "Estimate the current USD price of '${product.name}'. Return a JSON object with a single key 'price' containing a float value."
+                            val response = generativeModel?.generateContent(pricePrompt)
+                            response?.text?.let { jsonStr ->
+                                estimatedPrice = JSONObject(jsonStr).optDouble("price", 0.0).takeIf { it > 0.0 }
+                            }
+                        } catch (e: Exception) {
+                            Log.e("BasilDebug", "Price estimation failed: ${e.message}")
                         }
-                    } catch (e: Exception) {
-                        Log.e("BasilDebug", "Price estimation failed: ${e.message}")
                     }
                 }
 

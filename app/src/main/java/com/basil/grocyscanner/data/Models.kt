@@ -1,12 +1,16 @@
 package com.basil.grocyscanner.data
 
-data class ProductResponse(val product: ProductDetails, val stock_amount: Double?)
-
+data class ProductResponse(
+    val product: ProductDetails,
+    val stock_amount: Double?,
+    val last_price: Double? = null
+)
 data class ProductDetails(
     val id: Int,
     val name: String,
     val category_id: Int?,
     val default_best_before_days: Int,
+    val default_price: Double? = null,
     val picture_file_name: String? = null
 )
 

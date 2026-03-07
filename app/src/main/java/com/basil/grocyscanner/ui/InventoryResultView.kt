@@ -1,6 +1,5 @@
 package com.basil.grocyscanner.ui
 
-import android.content.Context
 import android.util.Base64
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
