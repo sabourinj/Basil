@@ -15,8 +15,8 @@ android {
         applicationId = "com.basil.grocyscanner"
         minSdk = 33
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.1.0-AI"
+        versionCode = (System.currentTimeMillis() / 1000).toInt()
+        versionName = libs.versions.app.version.name.get()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -36,6 +36,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

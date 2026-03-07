@@ -46,6 +46,7 @@ import com.basil.grocyscanner.ui.theme.DarkerHeaderPurple
 import com.basil.grocyscanner.ui.theme.DeepPurple
 import com.basil.grocyscanner.ui.theme.ErrorRed
 import com.basil.grocyscanner.ui.theme.SuccessGreen
+import com.google.ai.client.generativeai.BuildConfig
 
 
 @Composable
@@ -150,7 +151,7 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(16.dp))
             Text(text = "Basil", style = MaterialTheme.typography.headlineLarge, color = Color.White, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(8.dp))
-            Text(text = "Version 1.1.0-AI", style = MaterialTheme.typography.titleMedium, color = Color.LightGray)
+            Text(text = "${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.titleMedium, color = Color.LightGray)
 
             Spacer(modifier = Modifier.height(32.dp))
 
