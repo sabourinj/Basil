@@ -47,6 +47,7 @@ import com.basil.grocyscanner.ui.theme.DarkerHeaderPurple
 import com.basil.grocyscanner.ui.theme.DeepPurple
 import com.basil.grocyscanner.ui.theme.ErrorRed
 import com.basil.grocyscanner.ui.theme.SuccessGreen
+import com.google.ai.client.generativeai.BuildConfig
 
 @Composable
 fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
