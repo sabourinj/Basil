@@ -41,12 +41,12 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.basil.grocyscanner.BuildConfig
 import com.basil.grocyscanner.R
 import com.basil.grocyscanner.ui.theme.DarkerHeaderPurple
 import com.basil.grocyscanner.ui.theme.DeepPurple
 import com.basil.grocyscanner.ui.theme.ErrorRed
 import com.basil.grocyscanner.ui.theme.SuccessGreen
-
 
 @Composable
 fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
@@ -150,7 +150,7 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(16.dp))
             Text(text = "Basil", style = MaterialTheme.typography.headlineLarge, color = Color.White, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(8.dp))
-            Text(text = "Version 1.1.0-AI", style = MaterialTheme.typography.titleMedium, color = Color.LightGray)
+            Text(text = "${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.titleMedium, color = Color.LightGray)
 
             Spacer(modifier = Modifier.height(32.dp))
 
