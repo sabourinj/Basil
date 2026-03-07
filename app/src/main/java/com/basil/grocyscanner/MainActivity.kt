@@ -20,8 +20,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.core.content.edit
 import androidx.core.graphics.toColorInt
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import com.basil.grocyscanner.data.GrocyApi
 import com.basil.grocyscanner.ui.AiSetupScreen
 import com.basil.grocyscanner.ui.GrocyScannerApp
@@ -75,7 +80,10 @@ class MainActivity : ComponentActivity() {
 
                 Surface(modifier = Modifier.fillMaxSize(), color = DeepPurple, contentColor = Color.White) {
 
-                    DisposableEffect(currentScreen) {
+                    val context = LocalContext.current
+                    val lifecycleOwner = LocalLifecycleOwner.current
+
+                    DisposableEffect(lifecycleOwner, currentScreen) {
                         val receiver = object : BroadcastReceiver() {
                             override fun onReceive(context: Context?, intent: Intent?) {
                                 val scannedText = intent?.getStringExtra("barcode_data")?.trim()
@@ -110,8 +118,22 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
-                        registerReceiver(receiver, IntentFilter("com.basil.grocyscanner.SCAN"), RECEIVER_EXPORTED)
-                        onDispose { unregisterReceiver(receiver) }
+
+                        // Only listen when the app is actively on the screen
+                        val observer = LifecycleEventObserver { _, event ->
+                            if (event == Lifecycle.Event.ON_RESUME) {
+                                context.registerReceiver(receiver, IntentFilter("com.basil.grocyscanner.SCAN"), RECEIVER_EXPORTED)
+                            } else if (event == Lifecycle.Event.ON_PAUSE) {
+                                context.unregisterReceiver(receiver)
+                            }
+                        }
+
+                        lifecycleOwner.lifecycle.addObserver(observer)
+
+                        onDispose {
+                            lifecycleOwner.lifecycle.removeObserver(observer)
+                            try { context.unregisterReceiver(receiver) } catch (e: IllegalArgumentException) { /* Ignored */ }
+                        }
                     }
 
                     when (currentScreen) {

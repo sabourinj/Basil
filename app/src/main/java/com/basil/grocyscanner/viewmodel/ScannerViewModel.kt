@@ -26,6 +26,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
     private val categoriesRequiringDate = listOf(3, 5, 8)
     private var cachedLocations = listOf<GrocyLocation>()
     private var cachedGroups = listOf<GrocyProductGroup>()
+    private var isProcessingAction = false
 
     sealed class AppState {
         object Idle : AppState()
@@ -224,8 +225,11 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
     }
 
     fun confirmAction(productId: Int, amount: Int, expireDate: String?, price: Double?) {
+        if (isProcessingAction) return
+        isProcessingAction = true
+
         viewModelScope.launch {
-            _state.value = AppState.Loading(if (_currentMode.value == AppMode.PURCHASE) "Adding to stock..." else "Consuming stock...")
+            _state.value = AppState.Loading(if (_currentMode.value == AppMode.PURCHASE) "Adding stock..." else "Consuming stock...")
             try {
                 if (_currentMode.value == AppMode.PURCHASE) {
                     api.addStock(productId, AddStockRequest(amount, price, expireDate))
@@ -249,12 +253,14 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
 
             } catch (e: HttpException) {
                 if (_currentMode.value == AppMode.CONSUME && e.code() == 400) {
-                    _state.value = AppState.Error("No stock found to consume!")
+                    _state.value = AppState.Error("No stock found!")
                 } else {
                     _state.value = AppState.Error("Action failed: HTTP ${e.code()}")
                 }
             } catch (e: Exception) {
                 _state.value = AppState.Error("Action failed: ${e.message}")
+            } finally {
+                isProcessingAction = false
             }
         }
     }
