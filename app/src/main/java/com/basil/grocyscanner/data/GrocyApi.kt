@@ -40,4 +40,10 @@ interface GrocyApi {
 
     @PUT("objects/products/{productId}")
     suspend fun updateProduct(@Path("productId") productId: Int, @Body productData: @JvmSuppressWildcards Map<String, Any>)
+
+    @GET("objects/userfields")
+    suspend fun getUserfields(): List<UserfieldDefinition>
+
+    @POST("objects/userfields")
+    suspend fun createUserfield(@Body request: UserfieldCreateRequest)
 }

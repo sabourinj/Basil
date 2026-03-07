@@ -9,6 +9,7 @@ data class ProductDetails(
     val id: Int,
     val name: String,
     val category_id: Int?,
+    val product_group_id: Int? = null,
     val default_best_before_days: Int,
     val default_price: Double? = null,
     val picture_file_name: String? = null
@@ -37,4 +38,27 @@ data class StockEntry(
 
 data class GrocyLocation(val id: Int, val name: String)
 
-data class GrocyProductGroup(val id: Int, val name: String)
+data class GrocyProductGroup(
+    val id: Int,
+    val name: String,
+    val userfields: GroupUserfields? = null
+)
+
+data class GroupUserfields(
+    val expiration_strategy: String? = null
+)
+
+data class UserfieldDefinition(
+    val id: Int,
+    val name: String,
+    val entity: String
+)
+
+data class UserfieldCreateRequest(
+    val entity: String = "product_groups",
+    val name: String = "expiration_strategy",
+    val caption: String = "Basil Expiration Date Strategy",
+    val type: String = "preset-list",
+    val config: String = "{\"options\":\"user_entry,ai_estimate,not_required\"}",
+    val show_as_column_in_tables: Int = 1
+)

@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import retrofit2.HttpException
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 enum class AppMode { PURCHASE, CONSUME, INVENTORY }
 
@@ -220,10 +222,24 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                     }
                 }
 
-                if (product.category_id in categoriesRequiringDate || product.default_best_before_days > 0) {
-                    _state.value = AppState.NeedsDate(product, estimatedPrice)
-                } else {
-                    confirmAction(product.id, 1, null, estimatedPrice)
+                val productGroup = cachedGroups.find { it.id == product.product_group_id }
+
+                val strategy = productGroup?.userfields?.expiration_strategy ?: "ai_estimate"
+                val shelfLife = product.default_best_before_days
+
+                when (strategy) {
+                    "user_entry" -> {
+                        _state.value = AppState.NeedsDate(product, estimatedPrice)
+                    }
+                    "ai_estimate" -> {
+                        val daysToAdd = if (shelfLife > 0) shelfLife.toLong() else 7L
+                        val autoCalculatedDate = LocalDate.now().plusDays(daysToAdd).format(
+                            DateTimeFormatter.ISO_LOCAL_DATE)
+                        confirmAction(product.id, 1, autoCalculatedDate, estimatedPrice)
+                    }
+                    "not_required", "" -> {
+                        confirmAction(product.id, 1, null, estimatedPrice)
+                    }
                 }
             }
         }
