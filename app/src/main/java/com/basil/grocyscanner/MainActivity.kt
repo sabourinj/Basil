@@ -29,13 +29,16 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import com.basil.grocyscanner.data.GrocyApi
+import com.basil.grocyscanner.data.UserfieldCreateRequest
 import com.basil.grocyscanner.ui.AiSetupScreen
 import com.basil.grocyscanner.ui.GrocyScannerApp
 import com.basil.grocyscanner.ui.SettingsScreen
 import com.basil.grocyscanner.ui.UnconfiguredScreen
 import com.basil.grocyscanner.ui.theme.DeepPurple
 import com.basil.grocyscanner.viewmodel.ScannerViewModel
+import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.RequestBody
@@ -108,7 +111,10 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                     "ai_setup" -> {
-                                        sharedPrefs.edit { putString("GEMINI_KEY", scannedText) }
+                                        sharedPrefs.edit {
+                                            putString("GEMINI_KEY", scannedText)
+                                            putBoolean("AI_ENABLED", true)
+                                        }
                                         aiEnabledState = true
                                         initializeApi(
                                             sharedPrefs.getString("API_URL", "")!!,
@@ -220,6 +226,34 @@ class MainActivity : ComponentActivity() {
         val retrofit = Retrofit.Builder().baseUrl(safeUrl).client(okHttpClient)
             .addConverterFactory(GsonConverterFactory.create()).build()
 
-        viewModel = ScannerViewModel(retrofit.create(GrocyApi::class.java), geminiKey)
+        val grocyApi = retrofit.create(GrocyApi::class.java)
+
+        // --- THE FIX: Async Setup Block ---
+        lifecycleScope.launch {
+            try {
+                runInitialSetup(grocyApi)
+            } catch (e: Exception) {
+                Log.e("BasilDebug", "Schema setup failed, but continuing: ${e.message}")
+            }
+
+            // Build the ViewModel after the database is ready
+            viewModel = ScannerViewModel(grocyApi, geminiKey)
+        }
+    }
+
+    private suspend fun runInitialSetup(api: GrocyApi) {
+        val existingFields = api.getUserfields()
+
+        val fieldExists = existingFields.any {
+            it.name == "expiration_strategy" && it.entity == "product_groups"
+        }
+
+        if (!fieldExists) {
+            Log.d("BasilDebug", "Injecting custom fields into Grocy...")
+            api.createUserfield(UserfieldCreateRequest())
+            Log.d("BasilDebug", "Successfully created expiration_strategy userfield.")
+        } else {
+            Log.d("BasilDebug", "Grocy database schema is already up to date.")
+        }
     }
 }

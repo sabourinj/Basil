@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import retrofit2.HttpException
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 enum class AppMode { PURCHASE, CONSUME, INVENTORY }
 
@@ -91,15 +93,17 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         lastScanTime = currentTime
 
         viewModelScope.launch {
-            _state.value = AppState.Loading("Identifying barcode...")
+            _state.value = AppState.Loading("Identifying product...")
             delay(150)
 
             var isNewlyAdded = false
-            var currentProduct: ProductDetails?
+            var currentProduct: ProductDetails? = null
+            var knownPrice: Double? = null
 
             try {
                 val response = api.getProductByBarcode(barcode)
                 currentProduct = response.product
+                knownPrice = response.last_price ?: response.product.default_price
             } catch (_: HttpException) {
                 if (_currentMode.value == AppMode.INVENTORY) {
                     _state.value = AppState.Error("Product not found.")
@@ -116,6 +120,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 try {
                     val newResponse = api.getProductByBarcode(barcode)
                     currentProduct = newResponse.product
+                    knownPrice = newResponse.last_price ?: newResponse.product.default_price
                     isNewlyAdded = true
                 } catch (_: Exception) {
                     _state.value = AppState.Error("Unable to identify product.\nAdd manually in Grocy.")
@@ -126,12 +131,22 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 return@launch
             }
 
-            currentProduct.let { product ->
+            currentProduct?.let { product ->
                 if (isNewlyAdded && generativeModel != null) {
                     _state.value = AppState.Loading("Analyzing product...")
                     enrichProductWithGemini(product.id, product.name)
+
+                    try {
+                        _state.value = AppState.Loading("Creating new product...")
+                        val updatedResponse = api.getProductByBarcode(barcode)
+                        processFoundProduct(updatedResponse.product, knownPrice)
+                    } catch (e: Exception) {
+                        processFoundProduct(product, knownPrice)
+                    }
+
+                } else {
+                    processFoundProduct(product, knownPrice)
                 }
-                processFoundProduct(product)
             }
         }
     }
@@ -177,11 +192,11 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         }
     }
 
-    private suspend fun processFoundProduct(product: ProductDetails) {
+    private suspend fun processFoundProduct(product: ProductDetails, knownPrice: Double? = null) {
         when (_currentMode.value) {
             AppMode.INVENTORY -> {
                 try {
-                    _state.value = AppState.Loading("Fetching inventory data...")
+                    _state.value = AppState.Loading("Checking inventory data...")
                     val rawEntries = api.getStockEntries(product.id)
                     val groupedEntries = rawEntries
                         .groupBy { if (it.best_before_date.isNullOrBlank()) "2999-12-31" else it.best_before_date }
@@ -200,25 +215,41 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             }
             AppMode.CONSUME -> confirmAction(product.id, 1, null, null)
             AppMode.PURCHASE -> {
-                var estimatedPrice: Double? = null
+                var estimatedPrice: Double? = knownPrice
 
-                if (generativeModel != null) {
-                    _state.value = AppState.Loading("Estimating price...")
-                    try {
-                        val pricePrompt = "Estimate the current USD price of '${product.name}'. Return a JSON object with a single key 'price' containing a float value."
-                        val response = generativeModel?.generateContent(pricePrompt)
-                        response?.text?.let { jsonStr ->
-                            estimatedPrice = JSONObject(jsonStr).optDouble("price", 0.0).takeIf { it > 0.0 }
+                if (estimatedPrice == null || estimatedPrice <= 0.0) {
+                    if (generativeModel != null) {
+                        _state.value = AppState.Loading("Estimating price...")
+                        try {
+                            val pricePrompt = "Estimate the current USD price of '${product.name}'. Return a JSON object with a single key 'price' containing a float value."
+                            val response = generativeModel?.generateContent(pricePrompt)
+                            response?.text?.let { jsonStr ->
+                                estimatedPrice = JSONObject(jsonStr).optDouble("price", 0.0).takeIf { it > 0.0 }
+                            }
+                        } catch (e: Exception) {
+                            Log.e("BasilDebug", "Price estimation failed: ${e.message}")
                         }
-                    } catch (e: Exception) {
-                        Log.e("BasilDebug", "Price estimation failed: ${e.message}")
                     }
                 }
 
-                if (product.category_id in categoriesRequiringDate || product.default_best_before_days > 0) {
-                    _state.value = AppState.NeedsDate(product, estimatedPrice)
-                } else {
-                    confirmAction(product.id, 1, null, estimatedPrice)
+                val productGroup = cachedGroups.find { it.id == product.product_group_id }
+
+                val strategy = productGroup?.userfields?.expiration_strategy ?: "ai_estimate"
+                val shelfLife = product.default_best_before_days
+
+                when (strategy) {
+                    "user_entry" -> {
+                        _state.value = AppState.NeedsDate(product, estimatedPrice)
+                    }
+                    "ai_estimate" -> {
+                        val daysToAdd = if (shelfLife > 0) shelfLife.toLong() else 7L
+                        val autoCalculatedDate = LocalDate.now().plusDays(daysToAdd).format(
+                            DateTimeFormatter.ISO_LOCAL_DATE)
+                        confirmAction(product.id, 1, autoCalculatedDate, estimatedPrice)
+                    }
+                    "not_required", "" -> {
+                        confirmAction(product.id, 1, null, estimatedPrice)
+                    }
                 }
             }
         }
@@ -230,6 +261,8 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
 
         viewModelScope.launch {
             _state.value = AppState.Loading(if (_currentMode.value == AppMode.PURCHASE) "Adding stock..." else "Consuming stock...")
+            var isSuccess = false
+
             try {
                 if (_currentMode.value == AppMode.PURCHASE) {
                     api.addStock(productId, AddStockRequest(amount, price, expireDate))
@@ -247,9 +280,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                     productId = productId,
                     currentStock = remaining
                 )
-
-                delay(6000)
-                if (_state.value is AppState.Success) resetState()
+                isSuccess = true
 
             } catch (e: HttpException) {
                 if (_currentMode.value == AppMode.CONSUME && e.code() == 400) {
@@ -261,6 +292,12 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 _state.value = AppState.Error("Action failed: ${e.message}")
             } finally {
                 isProcessingAction = false
+            }
+
+            if (isSuccess) {
+                delay(6000)
+
+                if (_state.value is AppState.Success) resetState()
             }
         }
     }
