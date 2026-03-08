@@ -137,7 +137,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                     enrichProductWithGemini(product.id, product.name)
 
                     try {
-                        _state.value = AppState.Loading("Finalizing...")
+                        _state.value = AppState.Loading("Creating new product...")
                         val updatedResponse = api.getProductByBarcode(barcode)
                         processFoundProduct(updatedResponse.product, knownPrice)
                     } catch (e: Exception) {
@@ -261,6 +261,8 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
 
         viewModelScope.launch {
             _state.value = AppState.Loading(if (_currentMode.value == AppMode.PURCHASE) "Adding stock..." else "Consuming stock...")
+            var isSuccess = false
+
             try {
                 if (_currentMode.value == AppMode.PURCHASE) {
                     api.addStock(productId, AddStockRequest(amount, price, expireDate))
@@ -278,9 +280,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                     productId = productId,
                     currentStock = remaining
                 )
-
-                delay(6000)
-                if (_state.value is AppState.Success) resetState()
+                isSuccess = true
 
             } catch (e: HttpException) {
                 if (_currentMode.value == AppMode.CONSUME && e.code() == 400) {
@@ -292,6 +292,12 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 _state.value = AppState.Error("Action failed: ${e.message}")
             } finally {
                 isProcessingAction = false
+            }
+
+            if (isSuccess) {
+                delay(6000)
+
+                if (_state.value is AppState.Success) resetState()
             }
         }
     }

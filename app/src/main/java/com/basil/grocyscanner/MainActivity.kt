@@ -111,7 +111,10 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                     "ai_setup" -> {
-                                        sharedPrefs.edit { putString("GEMINI_KEY", scannedText) }
+                                        sharedPrefs.edit {
+                                            putString("GEMINI_KEY", scannedText)
+                                            putBoolean("AI_ENABLED", true)
+                                        }
                                         aiEnabledState = true
                                         initializeApi(
                                             sharedPrefs.getString("API_URL", "")!!,
