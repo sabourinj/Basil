@@ -105,7 +105,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 currentProduct = response.product
                 knownPrice = response.last_price ?: response.product.default_price
             } catch (_: HttpException) {
-                if (_currentMode.value == AppMode.INVENTORY) {
+                if (_currentMode.value == AppMode.INVENTORY || _currentMode.value == AppMode.CONSUME) {
                     _state.value = AppState.Error("Product not found.")
                     return@launch
                 }
@@ -196,7 +196,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         when (_currentMode.value) {
             AppMode.INVENTORY -> {
                 try {
-                    _state.value = AppState.Loading("Checking inventory data...")
+                    _state.value = AppState.Loading("Checking inventory...")
                     val rawEntries = api.getStockEntries(product.id)
                     val groupedEntries = rawEntries
                         .groupBy { if (it.best_before_date.isNullOrBlank()) "2999-12-31" else it.best_before_date }
@@ -294,11 +294,6 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 isProcessingAction = false
             }
 
-            if (isSuccess) {
-                delay(6000)
-
-                if (_state.value is AppState.Success) resetState()
-            }
         }
     }
 
