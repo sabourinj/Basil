@@ -20,7 +20,6 @@ import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.TakeoutDining
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
@@ -37,7 +36,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -51,7 +52,6 @@ import androidx.compose.ui.unit.dp
 import com.basil.grocyscanner.R
 import com.basil.grocyscanner.ui.theme.DarkerHeaderPurple
 import com.basil.grocyscanner.ui.theme.DeepPurple
-import com.basil.grocyscanner.ui.theme.ErrorRed
 import com.basil.grocyscanner.ui.theme.SuccessGreen
 import com.basil.grocyscanner.viewmodel.AppMode
 import com.basil.grocyscanner.viewmodel.ScannerViewModel
@@ -193,10 +193,12 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
                 }
                 is ScannerViewModel.AppState.Success -> {
                     Text(currentState.message, style = MaterialTheme.typography.headlineMedium, color = SuccessGreen, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold)
+
                     if (currentState.stockMessage.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(text = currentState.stockMessage, style = MaterialTheme.typography.titleMedium, color = Color.LightGray, textAlign = TextAlign.Center)
                     }
+
                     if (currentState.productId != null && currentState.currentStock > 0.0) {
                         Spacer(modifier = Modifier.height(32.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
@@ -216,6 +218,7 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
                             }
                         }
                     }
+
                     if (currentState.productId != null && currentState.currentStock <= 0.0) {
                         Spacer(modifier = Modifier.height(32.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
@@ -234,16 +237,78 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
                             }
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(32.dp))
+                    AutoResetCountdown(
+                        durationMillis = 4000L,
+                        message = "Ready to Scan...",
+                        onTimeout = {
+                            viewModel.resetState()
+                        }
+                    )
                 }
                 is ScannerViewModel.AppState.InventoryResult -> {
                     InventoryResultView(currentState = currentState)
                 }
                 is ScannerViewModel.AppState.Error -> {
-                    Text(currentState.error, style = MaterialTheme.typography.titleMedium, color = ErrorRed, textAlign = TextAlign.Center)
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Button(onClick = { viewModel.resetState() }, colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DeepPurple)) { Text("Clear Error") }
+                    Text(
+                        text = currentState.error,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.headlineSmall
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    if (currentMode == AppMode.CONSUME) {
+                        AutoResetCountdown(
+                            durationMillis = 4000L,
+                            message = "Auto-clearing...",
+                            onTimeout = { viewModel.resetState() }
+                        )
+                    } else {
+                        Button(onClick = { viewModel.resetState() }) {
+                            Text("Clear Error")
+                        }
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+fun AutoResetCountdown(
+    durationMillis: Long,
+    message: String,
+    onTimeout: () -> Unit
+) {
+    var progress by remember { mutableStateOf(1f) }
+
+    LaunchedEffect(Unit) {
+        val startTime = System.currentTimeMillis()
+
+        while (System.currentTimeMillis() - startTime < durationMillis) {
+            val elapsed = System.currentTimeMillis() - startTime
+            progress = 1f - (elapsed.toFloat() / durationMillis)
+            kotlinx.coroutines.delay(16)
+        }
+
+        onTimeout()
+    }
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(
+                progress = { progress },
+                color = Color.White,
+                strokeWidth = 4.dp
+            )
+            // Calculate seconds remaining
+            Text(
+                text = ((durationMillis * progress) / 1000).toInt().plus(1).toString(),
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(message)
     }
 }
