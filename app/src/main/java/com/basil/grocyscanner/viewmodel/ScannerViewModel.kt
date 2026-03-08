@@ -135,8 +135,18 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 if (isNewlyAdded && generativeModel != null) {
                     _state.value = AppState.Loading("Analyzing product...")
                     enrichProductWithGemini(product.id, product.name)
+
+                    try {
+                        _state.value = AppState.Loading("Finalizing...")
+                        val updatedResponse = api.getProductByBarcode(barcode)
+                        processFoundProduct(updatedResponse.product, knownPrice)
+                    } catch (e: Exception) {
+                        processFoundProduct(product, knownPrice)
+                    }
+
+                } else {
+                    processFoundProduct(product, knownPrice)
                 }
-                processFoundProduct(product, knownPrice)
             }
         }
     }
