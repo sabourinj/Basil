@@ -79,7 +79,7 @@ fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.Inve
     Spacer(modifier = Modifier.height(8.dp))
 
     if (currentState.entries.isEmpty()) {
-        Text("No items currently in stock.", color = ErrorRed, style = MaterialTheme.typography.titleMedium)
+        Text("No stock found!.", color = ErrorRed, style = MaterialTheme.typography.titleMedium)
     } else {
         Card(
             colors = CardDefaults.cardColors(containerColor = DarkerHeaderPurple),

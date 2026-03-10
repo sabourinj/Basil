@@ -13,8 +13,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -23,6 +25,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -32,6 +35,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -41,12 +45,16 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.basil.grocyscanner.BuildConfig
 import com.basil.grocyscanner.R
 import com.basil.grocyscanner.ui.theme.DarkerHeaderPurple
 import com.basil.grocyscanner.ui.theme.DeepPurple
 import com.basil.grocyscanner.ui.theme.ErrorRed
 import com.basil.grocyscanner.ui.theme.SuccessGreen
+import com.mikepenz.aboutlibraries.ui.compose.m3.LibrariesContainer
 
 @Composable
 fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
@@ -131,6 +139,8 @@ fun SettingsScreen(
     onLogout: () -> Unit,
     onNavigateBack: () -> Unit
 ) {
+    var showCreditsDialog by remember { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -186,6 +196,59 @@ fun SettingsScreen(
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
+
+            Spacer(modifier = Modifier.height(16.dp))
+            TextButton(onClick = { showCreditsDialog = true }) { Text("Open Source Licenses", color = Color.Gray) }
+
+        }
+    }
+    if (showCreditsDialog) {
+        Dialog(
+            onDismissRequest = { showCreditsDialog = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(0.8f),
+                shape = RoundedCornerShape(16.dp),
+                color = Color.LightGray
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Open Source Licenses",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = Color.Black
+                        )
+                        IconButton(onClick = { showCreditsDialog = false }) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close Credits",
+                                tint = Color.Black
+                            )
+                        }
+                    }
+
+                    MaterialTheme(
+                        colorScheme = MaterialTheme.colorScheme,
+                        typography = MaterialTheme.typography.copy(
+                            titleLarge = MaterialTheme.typography.titleLarge.copy(fontSize = 16.sp), // Library Names
+                            bodyMedium = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp), // Library Descriptions
+                            bodySmall = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),   // Version Numbers
+                            labelLarge = MaterialTheme.typography.labelLarge.copy(fontSize = 10.sp)  // License Badges
+                        )
+                    ) {
+                        LibrariesContainer(
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
+            }
         }
     }
 }

@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.aboutlibraries)
 }
 
 base {
@@ -60,6 +61,8 @@ dependencies {
     implementation(libs.androidx.security.crypto)
     implementation(libs.coil.compose)
     implementation(libs.generativeai)
+    implementation(libs.aboutlibraries.compose)
+    implementation(libs.aboutlibraries.core)
 
     // TESTING
     testImplementation(libs.junit)
