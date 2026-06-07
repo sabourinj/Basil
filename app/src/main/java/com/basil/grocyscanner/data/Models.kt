@@ -2,63 +2,85 @@ package com.basil.grocyscanner.data
 
 data class ProductResponse(
     val product: ProductDetails,
-    val stock_amount: Double?,
-    val last_price: Double? = null
+    val last_price: Double? = null,
+    val stock_amount: Double? = null,
+    val barcode: BarcodeDetails? = null
 )
+
 data class ProductDetails(
     val id: Int,
     val name: String,
-    val category_id: Int?,
+    val description: String? = null,
+    val location_id: Int? = null,
     val product_group_id: Int? = null,
-    val default_best_before_days: Int,
+    val default_best_before_days: Int = 0,
     val default_price: Double? = null,
+    val stock_amount: Double? = null,
     val picture_file_name: String? = null
 )
 
-data class AddStockRequest(
-    val amount: Int,
-    val price: Double? = null,
-    val best_before_date: String? = null,
-    val transaction_type: String = "purchase"
+data class BarcodeDetails(
+    val id: Int? = null,
+    val barcode: String,
+    val product_id: Int? = null,
+    val amount: Double? = null
 )
 
-data class ConsumeStockRequest(
-    val amount: Int,
-    val transaction_type: String = "consume",
-    val spoiled: Boolean = false
-)
-
-data class OpenStockRequest(val amount: Int = 1)
-
-data class StockEntry(
+data class GrocyLocation(
     val id: Int,
-    val amount: Double,
-    val best_before_date: String?
+    val name: String
 )
-
-data class GrocyLocation(val id: Int, val name: String)
 
 data class GrocyProductGroup(
     val id: Int,
     val name: String,
-    val userfields: GroupUserfields? = null
+    val userfields: ProductGroupUserfields? = null
 )
 
-data class GroupUserfields(
+data class ProductGroupUserfields(
     val expiration_strategy: String? = null
 )
 
 data class UserfieldDefinition(
-    val id: Int,
     val name: String,
     val entity: String
 )
 
 data class UserfieldCreateRequest(
-    val entity: String = "product_groups",
     val name: String = "expiration_strategy",
-    val caption: String = "Basil Expiration Date Strategy",
+    val caption: String = "Expiration Strategy",
     val type: String = "preset-list",
-    val config: String = "{\"options\":\"user_entry,ai_estimate,not_required\"}",
-    val show_as_column_in_tables: Int = 1
+    val entity: String = "product_groups",
+    val config: String? = "{\"presets\":{\"not_required\":\"Not Required\",\"ai_estimate\":\"AI Estimate\",\"user_entry\":\"User Entry\"},\"default_value\":\"ai_estimate\"}"
+)
+
+data class AddStockRequest(
+    val amount: Double,
+    val price: Double?,
+    val best_before_date: String?,
+    val location_id: Int? = null
+)
+
+data class StockLogEntry(
+    val id: Int,
+    val product_id: Int,
+    val amount: Double,
+    val best_before_date: String?,
+    val stock_id: String?
+)
+
+data class ConsumeStockRequest(
+    val amount: Double,
+    val location_id: Int? = null
+)
+
+data class OpenStockRequest(
+    val amount: Int = 1
+)
+
+data class StockEntry(
+    val id: Int,
+    val amount: Double,
+    val best_before_date: String? = null,
+    val open: Int = 0
 )

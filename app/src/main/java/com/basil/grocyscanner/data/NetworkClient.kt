@@ -33,6 +33,7 @@ object NetworkClient {
                     val oldBody = original.body
                     val newBody = object : RequestBody() {
                         override fun contentType() = "application/json".toMediaTypeOrNull()
+                        override fun contentLength() = oldBody?.contentLength() ?: -1L
                         override fun writeTo(sink: BufferedSink) { oldBody?.writeTo(sink) }
                     }
                     requestBuilder.method(original.method, newBody)

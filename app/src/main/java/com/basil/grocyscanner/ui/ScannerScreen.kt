@@ -3,6 +3,13 @@ package com.basil.grocyscanner.ui
 import android.content.Context
 import android.os.VibrationEffect
 import android.os.VibratorManager
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,7 +52,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -60,10 +69,11 @@ import com.basil.grocyscanner.viewmodel.ScannerViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Unit) {
+fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNavigateToSettings: () -> Unit) {
     val state by viewModel.state.collectAsState()
     val currentMode by viewModel.currentMode.collectAsState()
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
 
     val vibrator = remember {
         val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
@@ -71,9 +81,25 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
     }
 
     LaunchedEffect(state) {
-        when (state) {
-            is ScannerViewModel.AppState.Success, is ScannerViewModel.AppState.InventoryResult -> {
-                vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+        when (val currentState = state) {
+            is ScannerViewModel.AppState.Success -> {
+                if (currentState.isPrinting || currentState.isOpened) {
+                    // Dramatic double-thump for printing or opening
+                    val pattern = longArrayOf(0, 200, 100, 200)
+                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                } else {
+                    // Standard success pulse
+                    vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+                }
+            }
+            is ScannerViewModel.AppState.InventoryResult -> {
+                if (currentState.isOpened) {
+                    // Dramatic double-thump for opening from inventory
+                    val pattern = longArrayOf(0, 200, 100, 200)
+                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                } else {
+                    vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+                }
             }
             is ScannerViewModel.AppState.NeedsDate, is ScannerViewModel.AppState.Error -> {
                 val pattern = longArrayOf(0, 150, 100, 150)
@@ -105,12 +131,18 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
         bottomBar = {
             Surface(color = DarkerHeaderPurple) {
                 Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ModeButton("Purchase", currentMode == AppMode.PURCHASE) { viewModel.setMode(
-                        AppMode.PURCHASE) }
-                    ModeButton("Consume", currentMode == AppMode.CONSUME) { viewModel.setMode(
-                        AppMode.CONSUME) }
-                    ModeButton("Inventory", currentMode == AppMode.INVENTORY) { viewModel.setMode(
-                        AppMode.INVENTORY) }
+                    ModeButton("Purchase", currentMode == AppMode.PURCHASE) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        viewModel.setMode(AppMode.PURCHASE)
+                    }
+                    ModeButton("Consume", currentMode == AppMode.CONSUME) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        viewModel.setMode(AppMode.CONSUME)
+                    }
+                    ModeButton("Inventory", currentMode == AppMode.INVENTORY) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        viewModel.setMode(AppMode.INVENTORY)
+                    }
                 }
             }
         },
@@ -185,15 +217,27 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
                         onSubmit = { date ->
                             viewModel.confirmAction(
                                 currentState.product.id,
-                                1,
+                                currentState.amount,
                                 date,
-                                currentState.estimatedPrice
+                                currentState.estimatedPrice,
+                                currentState.autoPrint
                             )
                         },
                         onCancel = { viewModel.resetState() }
                     )
                 }
                 is ScannerViewModel.AppState.Success -> {
+                    val infiniteTransition = rememberInfiniteTransition(label = "blink")
+                    val blinkAlpha by infiniteTransition.animateFloat(
+                        initialValue = 1f,
+                        targetValue = 0.2f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(400, easing = LinearEasing),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "blinkAlpha"
+                    )
+
                     Text(currentState.message, style = MaterialTheme.typography.headlineMedium, color = SuccessGreen, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold)
 
                     if (currentState.stockMessage.isNotEmpty()) {
@@ -201,19 +245,25 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
                         Text(text = currentState.stockMessage, style = MaterialTheme.typography.titleMedium, color = Color.LightGray, textAlign = TextAlign.Center)
                     }
 
-                    if (currentState.productId != null && currentState.currentStock > 0.0) {
+                    if (currentState.productId != null && currentState.currentStock > 0.0 && currentMode == AppMode.PURCHASE) {
                         Spacer(modifier = Modifier.height(32.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                             FilledIconButton(
-                                onClick = { viewModel.performQuickAction(currentState.productId, "print") },
-                                colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White, contentColor = DeepPurple),
+                                onClick = { viewModel.performQuickAction(currentState.productId, "print", currentState.stockId, currentState.addedAmount) },
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = if (currentState.isPrinting) Color.White.copy(alpha = blinkAlpha) else Color.White,
+                                    contentColor = DeepPurple
+                                ),
                                 modifier = Modifier.size(64.dp)
                             ) {
                                 Icon(imageVector = Icons.Filled.Print, contentDescription = "Print Label", modifier = Modifier.size(32.dp))
                             }
                             FilledIconButton(
-                                onClick = { viewModel.performQuickAction(currentState.productId, "open") },
-                                colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White, contentColor = DeepPurple),
+                                onClick = { viewModel.performQuickAction(currentState.productId, "open", currentState.stockId) },
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = if (currentState.isOpened) Color.White.copy(alpha = blinkAlpha) else Color.White,
+                                    contentColor = DeepPurple
+                                ),
                                 modifier = Modifier.size(64.dp)
                             ) {
                                 Icon(imageVector = Icons.Filled.TakeoutDining, contentDescription = "Mark Opened", modifier = Modifier.size(32.dp))
@@ -242,15 +292,16 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
 
                     Spacer(modifier = Modifier.height(32.dp))
                     AutoResetCountdown(
-                        durationMillis = 4000L,
+                        durationMillis = resetDurationSeconds * 1000L,
                         message = "Ready to Scan...",
+                        resetTrigger = currentState,
                         onTimeout = {
                             viewModel.resetState()
                         }
                     )
                 }
                 is ScannerViewModel.AppState.InventoryResult -> {
-                    InventoryResultView(currentState = currentState)
+                    InventoryResultView(currentState = currentState, viewModel = viewModel)
                 }
                 is ScannerViewModel.AppState.Error -> {
                     Text(
@@ -264,8 +315,9 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
 
                     if (currentMode == AppMode.CONSUME) {
                         AutoResetCountdown(
-                            durationMillis = 4000L,
+                            durationMillis = resetDurationSeconds * 1000L,
                             message = "Auto-clearing...",
+                            resetTrigger = currentState,
                             onTimeout = { viewModel.resetState() }
                         )
                     } else {
@@ -289,11 +341,12 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, onNavigateToSettings: () -> Uni
 fun AutoResetCountdown(
     durationMillis: Long,
     message: String,
+    resetTrigger: Any? = Unit,
     onTimeout: () -> Unit
 ) {
-    var progress by remember { mutableStateOf(1f) }
+    var progress by remember(resetTrigger) { mutableStateOf(1f) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(durationMillis, resetTrigger) {
         val startTime = System.currentTimeMillis()
 
         while (System.currentTimeMillis() - startTime < durationMillis) {

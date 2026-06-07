@@ -3,14 +3,7 @@ package com.basil.grocyscanner.viewmodel
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.basil.grocyscanner.data.AddStockRequest
-import com.basil.grocyscanner.data.ConsumeStockRequest
-import com.basil.grocyscanner.data.GrocyApi
-import com.basil.grocyscanner.data.GrocyLocation
-import com.basil.grocyscanner.data.GrocyProductGroup
-import com.basil.grocyscanner.data.OpenStockRequest
-import com.basil.grocyscanner.data.ProductDetails
-import com.basil.grocyscanner.data.StockEntry
+import com.basil.grocyscanner.data.*
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.generationConfig
 import kotlinx.coroutines.delay
@@ -33,10 +26,24 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
     sealed class AppState {
         object Idle : AppState()
         data class Loading(val message: String = "Communicating with Grocy...") : AppState()
-        data class NeedsDate(val product: ProductDetails, val estimatedPrice: Double? = null) : AppState()
-        data class Success(val message: String, val stockMessage: String = "", val productId: Int? = null, val currentStock: Double = 0.0) : AppState()
+        data class NeedsDate(val product: ProductDetails, val estimatedPrice: Double? = null, val amount: Double = 1.0, val autoPrint: Boolean = false) : AppState()
+        data class Success(
+            val message: String,
+            val stockMessage: String = "",
+            val productId: Int? = null,
+            val currentStock: Double = 0.0,
+            val stockId: String? = null,
+            val addedAmount: Double = 1.0,
+            val isPrinting: Boolean = false,
+            val isOpened: Boolean = false
+        ) : AppState()
         data class Error(val error: String) : AppState()
-        data class InventoryResult(val product: ProductDetails, val entries: List<StockEntry>) : AppState()
+        data class InventoryResult(
+            val product: ProductDetails,
+            val entries: List<StockEntry>,
+            val isOpened: Boolean = false,
+            val canOpen: Boolean = false
+        ) : AppState()
     }
 
     private val _state = MutableStateFlow<AppState>(AppState.Idle)
@@ -99,12 +106,18 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             var isNewlyAdded = false
             var currentProduct: ProductDetails? = null
             var knownPrice: Double? = null
+            var scanAmount = 1.0
+            var barcodeId: Int? = null
 
             try {
                 val response = api.getProductByBarcode(barcode)
                 currentProduct = response.product
                 knownPrice = response.last_price ?: response.product.default_price
-            } catch (_: HttpException) {
+                
+                val bDetails = fetchBarcodeDetails(barcode)
+                scanAmount = response.barcode?.amount ?: bDetails?.amount ?: 1.0
+                barcodeId = response.barcode?.id ?: bDetails?.id
+            } catch (e: HttpException) {
                 if (_currentMode.value == AppMode.INVENTORY || _currentMode.value == AppMode.CONSUME) {
                     _state.value = AppState.Error("Product not found.")
                     return@launch
@@ -121,6 +134,9 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                     val newResponse = api.getProductByBarcode(barcode)
                     currentProduct = newResponse.product
                     knownPrice = newResponse.last_price ?: newResponse.product.default_price
+                    val bDetails = fetchBarcodeDetails(barcode)
+                    scanAmount = newResponse.barcode?.amount ?: bDetails?.amount ?: 1.0
+                    barcodeId = newResponse.barcode?.id ?: bDetails?.id
                     isNewlyAdded = true
                 } catch (_: Exception) {
                     _state.value = AppState.Error("Unable to identify product.\nAdd manually in Grocy.")
@@ -139,15 +155,26 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                     try {
                         _state.value = AppState.Loading("Creating new product...")
                         val updatedResponse = api.getProductByBarcode(barcode)
-                        processFoundProduct(updatedResponse.product, knownPrice)
+                        val bDetails = fetchBarcodeDetails(barcode)
+                        processFoundProduct(updatedResponse.product, knownPrice, updatedResponse.barcode?.amount ?: bDetails?.amount ?: 1.0, updatedResponse.barcode?.id ?: bDetails?.id)
                     } catch (e: Exception) {
-                        processFoundProduct(product, knownPrice)
+                        processFoundProduct(product, knownPrice, scanAmount, barcodeId)
                     }
 
                 } else {
-                    processFoundProduct(product, knownPrice)
+                    processFoundProduct(product, knownPrice, scanAmount, barcodeId)
                 }
             }
+        }
+    }
+
+    private suspend fun fetchBarcodeDetails(barcode: String): BarcodeDetails? {
+        return try {
+            val details = api.getBarcodeDetails("barcode=$barcode")
+            details.firstOrNull()
+        } catch (e: Exception) {
+            Log.e("BasilDebug", "Failed to fetch barcode details: ${e.message}")
+            null
         }
     }
 
@@ -173,6 +200,11 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
 
             val response = generativeModel?.generateContent(prompt)
             response?.text?.let { jsonStr ->
+                val cleanJsonStr = jsonStr.trim()
+                    .removePrefix("```json")
+                    .removePrefix("```")
+                    .removeSuffix("```")
+                    .trim()
                 val json = JSONObject(jsonStr)
                 val updateMap = mutableMapOf<String, Any>()
 
@@ -192,28 +224,30 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         }
     }
 
-    private suspend fun processFoundProduct(product: ProductDetails, knownPrice: Double? = null) {
+    private suspend fun processFoundProduct(product: ProductDetails, knownPrice: Double? = null, amount: Double = 1.0, barcodeId: Int? = null) {
         when (_currentMode.value) {
             AppMode.INVENTORY -> {
                 try {
                     _state.value = AppState.Loading("Checking inventory...")
                     val rawEntries = api.getStockEntries(product.id)
+                    val canOpen = rawEntries.any { it.open == 0 }
                     val groupedEntries = rawEntries
                         .groupBy { if (it.best_before_date.isNullOrBlank()) "2999-12-31" else it.best_before_date }
                         .map { mapEntry ->
                             StockEntry(
                                 id = mapEntry.value.first().id,
                                 amount = mapEntry.value.sumOf { it.amount },
-                                best_before_date = mapEntry.key
+                                best_before_date = mapEntry.key,
+                                open = if (mapEntry.value.all { it.open == 1 }) 1 else 0
                             )
                         }
                         .sortedBy { it.best_before_date }
-                    _state.value = AppState.InventoryResult(product, groupedEntries)
+                    _state.value = AppState.InventoryResult(product, groupedEntries, canOpen = canOpen)
                 } catch (_: Exception) {
                     _state.value = AppState.Error("Failed to fetch stock entries.")
                 }
             }
-            AppMode.CONSUME -> confirmAction(product.id, 1, null, null)
+            AppMode.CONSUME -> confirmAction(product.id, amount, null, null)
             AppMode.PURCHASE -> {
                 var estimatedPrice: Double? = knownPrice
 
@@ -224,7 +258,12 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                             val pricePrompt = "Estimate the current USD price of '${product.name}'. Return a JSON object with a single key 'price' containing a float value."
                             val response = generativeModel?.generateContent(pricePrompt)
                             response?.text?.let { jsonStr ->
-                                estimatedPrice = JSONObject(jsonStr).optDouble("price", 0.0).takeIf { it > 0.0 }
+                                val cleanPriceStr = jsonStr.trim()
+                                    .removePrefix("```json")
+                                    .removePrefix("```")
+                                    .removeSuffix("```")
+                                    .trim()
+                                estimatedPrice = JSONObject(cleanPriceStr).optDouble("price", 0.0).takeIf { it > 0.0 }
                             }
                         } catch (e: Exception) {
                             Log.e("BasilDebug", "Price estimation failed: ${e.message}")
@@ -233,39 +272,47 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 }
 
                 val productGroup = cachedGroups.find { it.id == product.product_group_id }
-
                 val strategy = productGroup?.userfields?.expiration_strategy ?: "ai_estimate"
                 val shelfLife = product.default_best_before_days
 
+                var autoPrint = false
+                if (barcodeId != null) {
+                    try {
+                        val uf = api.getBarcodeUserfields(barcodeId)
+                        autoPrint = (uf["auto_print_label"]?.toString() ?: "0") == "1"
+                    } catch (_: Exception) {}
+                }
+
                 when (strategy) {
                     "user_entry" -> {
-                        _state.value = AppState.NeedsDate(product, estimatedPrice)
+                        _state.value = AppState.NeedsDate(product, estimatedPrice, amount, autoPrint)
                     }
                     "ai_estimate" -> {
                         val daysToAdd = if (shelfLife > 0) shelfLife.toLong() else 7L
                         val autoCalculatedDate = LocalDate.now().plusDays(daysToAdd).format(
                             DateTimeFormatter.ISO_LOCAL_DATE)
-                        confirmAction(product.id, 1, autoCalculatedDate, estimatedPrice)
+                        confirmAction(product.id, amount, autoCalculatedDate, estimatedPrice, autoPrint)
                     }
                     "not_required", "" -> {
-                        confirmAction(product.id, 1, null, estimatedPrice)
+                        confirmAction(product.id, amount, null, estimatedPrice, autoPrint)
                     }
                 }
             }
         }
     }
 
-    fun confirmAction(productId: Int, amount: Int, expireDate: String?, price: Double?) {
+    fun confirmAction(productId: Int, amount: Double, expireDate: String?, price: Double?, autoPrint: Boolean = false) {
         if (isProcessingAction) return
         isProcessingAction = true
 
         viewModelScope.launch {
             _state.value = AppState.Loading(if (_currentMode.value == AppMode.PURCHASE) "Adding stock..." else "Consuming stock...")
-            var isSuccess = false
+            var lastStockUuid: String? = null
 
             try {
                 if (_currentMode.value == AppMode.PURCHASE) {
-                    api.addStock(productId, AddStockRequest(amount, price, expireDate))
+                    val result = api.addStock(productId, AddStockRequest(amount, price, expireDate))
+                    lastStockUuid = result.firstOrNull()?.stock_id
                 } else {
                     api.consumeStock(productId, ConsumeStockRequest(amount))
                 }
@@ -278,9 +325,14 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                     message = "Success!",
                     stockMessage = "${if (_currentMode.value == AppMode.PURCHASE) "New stock level" else "Remaining stock"}: $stockStr",
                     productId = productId,
-                    currentStock = remaining
+                    currentStock = remaining,
+                    stockId = lastStockUuid,
+                    addedAmount = if (_currentMode.value == AppMode.PURCHASE) amount else 1.0
                 )
-                isSuccess = true
+                
+                if (autoPrint && _currentMode.value == AppMode.PURCHASE) {
+                    performQuickAction(productId, "print", lastStockUuid, amount)
+                }
 
             } catch (e: HttpException) {
                 if (_currentMode.value == AppMode.CONSUME && e.code() == 400) {
@@ -297,14 +349,60 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         }
     }
 
-    fun performQuickAction(productId: Int, action: String) {
+    fun performQuickAction(productId: Int, action: String, stockId: String? = null, amount: Double = 1.0) {
         viewModelScope.launch {
             try {
                 when(action) {
-                    "open" -> api.openStock(productId, OpenStockRequest())
-                    "print" -> api.printLabel(productId)
+                    "open" -> {
+                        api.openStock(productId, OpenStockRequest(1))
+                        val currentState = _state.value
+                        if (currentState is AppState.Success) {
+                            _state.value = currentState.copy(isOpened = true)
+                        } else if (currentState is AppState.InventoryResult) {
+                            // If opening from inventory, refresh the list
+                            val rawEntries = api.getStockEntries(productId)
+                            val canOpen = rawEntries.any { it.open == 0 }
+                            val groupedEntries = rawEntries
+                                .groupBy { if (it.best_before_date.isNullOrBlank()) "2999-12-31" else it.best_before_date }
+                                .map { mapEntry ->
+                                    StockEntry(
+                                        id = mapEntry.value.first().id,
+                                        amount = mapEntry.value.sumOf { it.amount },
+                                        best_before_date = mapEntry.key,
+                                        open = if (mapEntry.value.all { it.open == 1 }) 1 else 0
+                                    )
+                                }
+                                .sortedBy { it.best_before_date }
+                            _state.value = currentState.copy(entries = groupedEntries, isOpened = true, canOpen = canOpen)
+                            delay(1000)
+                            val finalState = _state.value
+                            if (finalState is AppState.InventoryResult) {
+                                _state.value = finalState.copy(isOpened = false)
+                            }
+                        }
+                    }
+                    "print" -> {
+                        val printCount = if (amount > 0) Math.ceil(amount).toInt() else 1
+                        val successState = _state.value as? AppState.Success
+                        if (successState != null) {
+                            _state.value = successState.copy(isPrinting = true)
+                        }
+
+                        repeat(printCount) {
+                            try {
+                                if (stockId != null) {
+                                    api.printStockLabel(stockId)
+                                } else {
+                                    api.printLabel(productId)
+                                }
+                            } catch (e: Exception) {
+                                Log.w("BasilDebug", "Specific label print failed, falling back to product label: ${e.message}")
+                                api.printLabel(productId)
+                            }
+                            delay(100) // Small delay between repeat prints
+                        }
+                    }
                 }
-                resetState()
             } catch (e: Exception) {
                 _state.value = AppState.Error("Quick action failed: ${e.message}")
             }
