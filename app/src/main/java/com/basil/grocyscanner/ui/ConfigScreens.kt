@@ -26,6 +26,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -136,6 +138,8 @@ fun RowScope.ModeButton(title: String, isSelected: Boolean, onClick: () -> Unit)
 fun SettingsScreen(
     isAiEnabled: Boolean,
     onToggleAi: (Boolean) -> Unit,
+    resetDurationSeconds: Int,
+    onResetDurationChange: (Int) -> Unit,
     onLogout: () -> Unit,
     onNavigateBack: () -> Unit
 ) {
@@ -175,6 +179,31 @@ fun SettingsScreen(
                     onCheckedChange = { onToggleAi(it) },
                     colors = SwitchDefaults.colors(checkedThumbColor = DeepPurple, checkedTrackColor = Color.LightGray)
                 )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Column(modifier = Modifier.fillMaxWidth(0.8f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Auto-Reset Delay", style = MaterialTheme.typography.titleMedium, color = Color.White)
+                    Text("${resetDurationSeconds}s", style = MaterialTheme.typography.titleMedium, color = SuccessGreen, fontWeight = FontWeight.Bold)
+                }
+                Slider(
+                    value = resetDurationSeconds.toFloat(),
+                    onValueChange = { onResetDurationChange(it.toInt()) },
+                    valueRange = 2f..10f,
+                    steps = 7,
+                    colors = SliderDefaults.colors(
+                        thumbColor = SuccessGreen,
+                        activeTrackColor = SuccessGreen,
+                        inactiveTrackColor = Color.Gray
+                    )
+                )
+                Text("Seconds until the screen clears after a scan.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
             }
 
             Spacer(modifier = Modifier.height(32.dp))
