@@ -77,6 +77,7 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 val currentVm = viewModel
                 var aiEnabledState by remember { mutableStateOf(sharedPrefs.getBoolean("AI_ENABLED", false)) }
+                var resetDurationSeconds by remember { mutableStateOf(sharedPrefs.getInt("RESET_DURATION", 4)) }
 
                 var currentScreen by remember {
                     mutableStateOf(
@@ -130,7 +131,6 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                        // Only listen when the app is actively on the screen
                         val observer = LifecycleEventObserver { _, event ->
                             if (event == Lifecycle.Event.ON_RESUME) {
                                 context.registerReceiver(receiver, IntentFilter("com.basil.grocyscanner.SCAN"), RECEIVER_EXPORTED)
@@ -162,7 +162,7 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                         "scanner" -> currentVm?.let {
-                            GrocyScannerApp(it, onNavigateToSettings = { currentScreen = "settings" })
+                            GrocyScannerApp(it, resetDurationSeconds, onNavigateToSettings = { currentScreen = "settings" })
                         }
                         "settings" -> SettingsScreen(
                             isAiEnabled = aiEnabledState,
@@ -180,10 +180,21 @@ class MainActivity : ComponentActivity() {
                                     )
                                 }
                             },
+                            resetDurationSeconds = resetDurationSeconds,
+                            onResetDurationChange = { duration ->
+                                resetDurationSeconds = duration
+                                sharedPrefs.edit { putInt("RESET_DURATION", duration) }
+                            },
+                            viewModel = currentVm!!,
+                            onStartBatchMove = { locId, locName ->
+                                currentVm.startBatchMove(locId, locName)
+                                currentScreen = "scanner"
+                            },
                             onLogout = {
                                 sharedPrefs.edit { clear() }
                                 viewModel = null
                                 aiEnabledState = false
+                                resetDurationSeconds = 4
                                 currentScreen = "unconfigured"
                             },
                             onNavigateBack = { currentScreen = "scanner" }
@@ -216,6 +227,7 @@ class MainActivity : ComponentActivity() {
                     val oldBody = original.body
                     val newBody = object : RequestBody() {
                         override fun contentType() = "application/json".toMediaTypeOrNull()
+                        override fun contentLength() = oldBody?.contentLength() ?: -1L
                         override fun writeTo(sink: BufferedSink) { oldBody?.writeTo(sink) }
                     }
                     requestBuilder.method(original.method, newBody)
@@ -228,7 +240,6 @@ class MainActivity : ComponentActivity() {
 
         val grocyApi = retrofit.create(GrocyApi::class.java)
 
-        // --- THE FIX: Async Setup Block ---
         lifecycleScope.launch {
             try {
                 runInitialSetup(grocyApi)
@@ -236,7 +247,6 @@ class MainActivity : ComponentActivity() {
                 Log.e("BasilDebug", "Schema setup failed, but continuing: ${e.message}")
             }
 
-            // Build the ViewModel after the database is ready
             viewModel = ScannerViewModel(grocyApi, geminiKey)
         }
     }
@@ -244,16 +254,30 @@ class MainActivity : ComponentActivity() {
     private suspend fun runInitialSetup(api: GrocyApi) {
         val existingFields = api.getUserfields()
 
-        val fieldExists = existingFields.any {
+        // 1. Expiration Strategy for Product Groups
+        val expStrategyExists = existingFields.any {
             it.name == "expiration_strategy" && it.entity == "product_groups"
         }
-
-        if (!fieldExists) {
-            Log.d("BasilDebug", "Injecting custom fields into Grocy...")
+        if (!expStrategyExists) {
+            Log.d("BasilDebug", "Injecting expiration_strategy field...")
             api.createUserfield(UserfieldCreateRequest())
-            Log.d("BasilDebug", "Successfully created expiration_strategy userfield.")
-        } else {
-            Log.d("BasilDebug", "Grocy database schema is already up to date.")
         }
+
+        // 2. Auto Print Label for Barcodes
+        val autoPrintExists = existingFields.any {
+            it.name == "auto_print_label" && it.entity == "product_barcodes"
+        }
+        if (!autoPrintExists) {
+            Log.d("BasilDebug", "Injecting auto_print_label field...")
+            api.createUserfield(UserfieldCreateRequest(
+                name = "auto_print_label",
+                caption = "Auto Print Label",
+                type = "checkbox",
+                entity = "product_barcodes",
+                config = null
+            ))
+        }
+
+        Log.d("BasilDebug", "Grocy database schema check complete.")
     }
 }

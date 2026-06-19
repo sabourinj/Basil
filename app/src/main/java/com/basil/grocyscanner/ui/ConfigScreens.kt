@@ -13,26 +13,39 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoveDown
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -50,10 +63,12 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.basil.grocyscanner.BuildConfig
 import com.basil.grocyscanner.R
+import com.basil.grocyscanner.data.GrocyLocation
 import com.basil.grocyscanner.ui.theme.DarkerHeaderPurple
 import com.basil.grocyscanner.ui.theme.DeepPurple
 import com.basil.grocyscanner.ui.theme.ErrorRed
 import com.basil.grocyscanner.ui.theme.SuccessGreen
+import com.basil.grocyscanner.viewmodel.ScannerViewModel
 import com.mikepenz.aboutlibraries.ui.compose.m3.LibrariesContainer
 
 @Composable
@@ -136,10 +151,17 @@ fun RowScope.ModeButton(title: String, isSelected: Boolean, onClick: () -> Unit)
 fun SettingsScreen(
     isAiEnabled: Boolean,
     onToggleAi: (Boolean) -> Unit,
+    resetDurationSeconds: Int,
+    onResetDurationChange: (Int) -> Unit,
+    viewModel: ScannerViewModel,
+    onStartBatchMove: (Int, String) -> Unit,
     onLogout: () -> Unit,
     onNavigateBack: () -> Unit
 ) {
     var showCreditsDialog by remember { mutableStateOf(false) }
+    var showBatchModal by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
+    val locations by viewModel.locations.collectAsState()
 
     Scaffold(
         topBar = {
@@ -152,18 +174,26 @@ fun SettingsScreen(
         containerColor = DeepPurple
     ) { paddingValues ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(paddingValues).padding(16.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .verticalScroll(scrollState)
+                .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.Top
         ) {
-            Image(painter = painterResource(id = R.drawable.basil_logo), contentDescription = "Basil Logo", modifier = Modifier.size(96.dp))
+            Spacer(modifier = Modifier.height(24.dp))
+            Image(painter = painterResource(id = R.drawable.basil_logo), contentDescription = "Basil Logo", modifier = Modifier.size(80.dp))
             Spacer(modifier = Modifier.height(16.dp))
             Text(text = "Basil", style = MaterialTheme.typography.headlineLarge, color = Color.White, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = "${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.titleMedium, color = Color.LightGray)
+            Text(text = "v${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.titleMedium, color = Color.LightGray)
 
             Spacer(modifier = Modifier.height(32.dp))
 
+            // Settings Group 1: Behavior
+            Text("App Behavior", style = MaterialTheme.typography.labelLarge, color = SuccessGreen, modifier = Modifier.fillMaxWidth(0.8f))
+            Spacer(modifier = Modifier.height(8.dp))
+            
             Row(
                 modifier = Modifier.fillMaxWidth(0.8f),
                 verticalAlignment = Alignment.CenterVertically,
@@ -177,17 +207,60 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Column(modifier = Modifier.fillMaxWidth(0.8f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Auto-Reset Delay", style = MaterialTheme.typography.titleMedium, color = Color.White)
+                    Text("${resetDurationSeconds}s", style = MaterialTheme.typography.titleMedium, color = SuccessGreen, fontWeight = FontWeight.Bold)
+                }
+                Slider(
+                    value = resetDurationSeconds.toFloat(),
+                    onValueChange = { onResetDurationChange(it.toInt()) },
+                    valueRange = 2f..10f,
+                    steps = 7,
+                    colors = SliderDefaults.colors(
+                        thumbColor = SuccessGreen,
+                        activeTrackColor = SuccessGreen,
+                        inactiveTrackColor = Color.Gray
+                    )
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+            HorizontalDivider(color = Color.Gray.copy(alpha = 0.3f), modifier = Modifier.fillMaxWidth(0.8f))
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Settings Group 2: Advanced Tools
+            Text("Advanced Tools", style = MaterialTheme.typography.labelLarge, color = SuccessGreen, modifier = Modifier.fillMaxWidth(0.8f))
+            Spacer(modifier = Modifier.height(16.dp))
 
             Button(
+                onClick = { showBatchModal = true },
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DeepPurple),
+                modifier = Modifier.fillMaxWidth(0.8f).height(56.dp)
+            ) {
+                Icon(imageVector = Icons.Default.MoveDown, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(12.dp))
+                Text("Batch Mode", fontWeight = FontWeight.Bold)
+            }
+
+            Spacer(modifier = Modifier.height(48.dp))
+
+            // Settings Group 3: Account
+            Button(
                 onClick = onLogout,
-                colors = ButtonDefaults.buttonColors(containerColor = ErrorRed, contentColor = DeepPurple),
+                colors = ButtonDefaults.buttonColors(containerColor = ErrorRed, contentColor = Color.White),
                 modifier = Modifier.fillMaxWidth(0.8f)
             ) {
                 Text("Logout / Disconnect", fontWeight = FontWeight.Bold)
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
             Text(
                 text = "Developed with ❤️ in Massachusetts\nby Justin Sabourin",
@@ -199,9 +272,21 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
             TextButton(onClick = { showCreditsDialog = true }) { Text("Open Source Licenses", color = Color.Gray) }
-
+            Spacer(modifier = Modifier.height(32.dp))
         }
     }
+
+    if (showBatchModal) {
+        BatchMoveModal(
+            locations = locations,
+            onConfirm = { locId, locName ->
+                showBatchModal = false
+                onStartBatchMove(locId, locName)
+            },
+            onDismiss = { showBatchModal = false }
+        )
+    }
+
     if (showCreditsDialog) {
         Dialog(
             onDismissRequest = { showCreditsDialog = false },
@@ -246,6 +331,93 @@ fun SettingsScreen(
                         LibrariesContainer(
                             modifier = Modifier.fillMaxSize()
                         )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BatchMoveModal(
+    locations: List<GrocyLocation>,
+    onConfirm: (Int, String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var selectedLocation by remember { mutableStateOf<GrocyLocation?>(null) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = DeepPurple,
+            border = BorderStroke(2.dp, Color.White)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("Select Destination", style = MaterialTheme.typography.headlineSmall, color = Color.White, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(24.dp))
+
+                ExposedDropdownMenuBox(
+                    expanded = expanded,
+                    onExpandedChange = { expanded = !expanded },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    TextField(
+                        value = selectedLocation?.name ?: "Select Location...",
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        colors = ExposedDropdownMenuDefaults.textFieldColors(
+                            focusedContainerColor = Color.White.copy(alpha = 0.1f),
+                            unfocusedContainerColor = Color.White.copy(alpha = 0.05f),
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryEditable, true)
+                    )
+
+                    ExposedDropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        locations.forEach { location ->
+                            DropdownMenuItem(
+                                text = { Text(location.name) },
+                                onClick = {
+                                    selectedLocation = location
+                                    expanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(32.dp))
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Button(
+                        onClick = { selectedLocation?.let { onConfirm(it.id, it.name) } },
+                        enabled = selectedLocation != null,
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = DeepPurple)
+                    ) {
+                        Text("Start Batch Mode", fontWeight = FontWeight.Bold)
+                    }
+                    
+                    Button(
+                        onClick = onDismiss,
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DeepPurple)
+                    ) {
+                        Text("Cancel", fontWeight = FontWeight.Bold)
                     }
                 }
             }

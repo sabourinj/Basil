@@ -18,16 +18,22 @@ interface GrocyApi {
     suspend fun getStockEntries(@Path("productId") productId: Int): List<StockEntry>
 
     @POST("stock/products/{productId}/add")
-    suspend fun addStock(@Path("productId") productId: Int, @Body request: AddStockRequest)
+    suspend fun addStock(@Path("productId") productId: Int, @Body request: AddStockRequest): List<StockLogEntry>
 
     @POST("stock/products/{productId}/consume")
     suspend fun consumeStock(@Path("productId") productId: Int, @Body request: ConsumeStockRequest)
+
+    @POST("stock/products/{productId}/transfer")
+    suspend fun transferStock(@Path("productId") productId: Int, @Body request: TransferStockRequest)
 
     @POST("stock/products/{productId}/open")
     suspend fun openStock(@Path("productId") productId: Int, @Body request: OpenStockRequest)
 
     @GET("stock/products/{productId}/printlabel")
     suspend fun printLabel(@Path("productId") productId: Int)
+
+    @GET("stock/entry/{stockId}/printlabel")
+    suspend fun printStockLabel(@Path("stockId") stockId: String)
 
     @GET("stock/barcodes/external-lookup/{barcode}")
     suspend fun externalBarcodeLookup(@Path("barcode") barcode: String, @Query("add") add: Boolean = true): Any
@@ -46,4 +52,16 @@ interface GrocyApi {
 
     @POST("objects/userfields")
     suspend fun createUserfield(@Body request: UserfieldCreateRequest)
+
+    @GET("objects/product_barcodes")
+    suspend fun getBarcodeDetails(@Query("query[]") query: String): List<BarcodeDetails>
+
+    @POST("objects/product_barcodes")
+    suspend fun addBarcode(@Body barcodeDetails: BarcodeDetails)
+
+    @PUT("objects/product_barcodes/{id}")
+    suspend fun updateBarcode(@Path("id") id: Int, @Body productData: @JvmSuppressWildcards Map<String, Any>)
+
+    @GET("userfields/product_barcodes/{barcodeId}")
+    suspend fun getBarcodeUserfields(@Path("barcodeId") barcodeId: Int): Map<String, Any>
 }

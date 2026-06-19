@@ -1,7 +1,12 @@
 package com.basil.grocyscanner.ui
 
 import android.util.Base64
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -10,15 +15,22 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.TakeoutDining
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -28,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.basil.grocyscanner.ui.theme.DarkerHeaderPurple
+import com.basil.grocyscanner.ui.theme.DeepPurple
 import com.basil.grocyscanner.ui.theme.ErrorRed
 import com.basil.grocyscanner.viewmodel.ScannerViewModel
 import java.time.LocalDate
@@ -37,15 +50,27 @@ import java.util.Locale
 
 
 @Composable
-fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.InventoryResult) {
+fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.InventoryResult, viewModel: ScannerViewModel) {
     val context = LocalContext.current
+
+    val infiniteTransition = rememberInfiniteTransition(label = "blink")
+    val blinkAlpha by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(400, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "blinkAlpha"
+    )
 
     Text(
         text = currentState.product.name,
         style = MaterialTheme.typography.headlineSmall,
         color = Color.White,
         textAlign = TextAlign.Center,
-        fontWeight = FontWeight.Bold
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(horizontal = 16.dp)
     )
 
     Spacer(modifier = Modifier.height(8.dp))
@@ -78,6 +103,27 @@ fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.Inve
 
     Spacer(modifier = Modifier.height(8.dp))
 
+    IconButton(
+        onClick = { viewModel.performQuickAction(currentState.product.id, "open") },
+        enabled = currentState.canOpen,
+        modifier = Modifier.size(48.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Filled.TakeoutDining,
+            contentDescription = "Open Next",
+            tint = if (currentState.isOpened) {
+                Color.White.copy(alpha = blinkAlpha)
+            } else if (!currentState.canOpen) {
+                Color.White.copy(alpha = 0.3f)
+            } else {
+                Color.White
+            },
+            modifier = Modifier.size(32.dp)
+        )
+    }
+
+    Spacer(modifier = Modifier.height(8.dp))
+
     if (currentState.entries.isEmpty()) {
         Text("No stock found!", color = ErrorRed, style = MaterialTheme.typography.titleMedium)
     } else {
@@ -86,9 +132,9 @@ fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.Inve
             modifier = Modifier.fillMaxWidth(0.85f)
         ) {
             Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Amount", color = Color.LightGray, fontWeight = FontWeight.Bold)
-                    Text("Expires", color = Color.LightGray, fontWeight = FontWeight.Bold)
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Text("Qty", color = Color.LightGray, fontWeight = FontWeight.Bold, modifier = Modifier.weight(0.3f))
+                    Text("Expires", color = Color.LightGray, fontWeight = FontWeight.Bold, modifier = Modifier.weight(0.7f))
                 }
                 HorizontalDivider(color = Color.Gray, modifier = Modifier.padding(vertical = 8.dp))
 
@@ -96,10 +142,10 @@ fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.Inve
                     items(currentState.entries) { entry ->
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             val amountStr = if (entry.amount % 1.0 == 0.0) entry.amount.toInt().toString() else entry.amount.toString()
-                            Text(amountStr, color = Color.White)
+                            Text(amountStr, color = if (entry.open == 1) Color.Gray else Color.White, modifier = Modifier.weight(0.3f))
 
                             val dateStr = remember(entry.best_before_date) {
                                 if (entry.best_before_date == "2999-12-31" || entry.best_before_date.isNullOrEmpty()) {
@@ -126,8 +172,8 @@ fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.Inve
                                 }
                             }
 
-                            val dateColor = if (dateStr.startsWith("Expired")) ErrorRed else Color.White
-                            Text(text = dateStr, color = dateColor)
+                            val dateColor = if (dateStr.startsWith("Expired")) ErrorRed else if (entry.open == 1) Color.Gray else Color.White
+                            Text(text = dateStr, color = dateColor, modifier = Modifier.weight(0.7f))
                         }
                     }
                 }
