@@ -7,7 +7,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -65,41 +64,14 @@ fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.Inve
         label = "blinkAlpha"
     )
 
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
-    ) {
-        Text(
-            text = currentState.product.name,
-            style = MaterialTheme.typography.headlineSmall,
-            color = Color.White,
-            textAlign = TextAlign.Center,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.weight(1f, fill = false)
-        )
-        
-        Spacer(modifier = Modifier.size(8.dp))
-
-        IconButton(
-            onClick = { viewModel.performQuickAction(currentState.product.id, "open") },
-            enabled = currentState.canOpen,
-            modifier = Modifier.size(32.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Filled.TakeoutDining,
-                contentDescription = "Open Next",
-                tint = if (currentState.isOpened) {
-                    Color.White.copy(alpha = blinkAlpha)
-                } else if (!currentState.canOpen) {
-                    Color.White.copy(alpha = 0.3f)
-                } else {
-                    Color.White
-                },
-                modifier = Modifier.size(24.dp)
-            )
-        }
-    }
+    Text(
+        text = currentState.product.name,
+        style = MaterialTheme.typography.headlineSmall,
+        color = Color.White,
+        textAlign = TextAlign.Center,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(horizontal = 16.dp)
+    )
 
     Spacer(modifier = Modifier.height(8.dp))
 
@@ -131,6 +103,27 @@ fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.Inve
 
     Spacer(modifier = Modifier.height(8.dp))
 
+    IconButton(
+        onClick = { viewModel.performQuickAction(currentState.product.id, "open") },
+        enabled = currentState.canOpen,
+        modifier = Modifier.size(48.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Filled.TakeoutDining,
+            contentDescription = "Open Next",
+            tint = if (currentState.isOpened) {
+                Color.White.copy(alpha = blinkAlpha)
+            } else if (!currentState.canOpen) {
+                Color.White.copy(alpha = 0.3f)
+            } else {
+                Color.White
+            },
+            modifier = Modifier.size(32.dp)
+        )
+    }
+
+    Spacer(modifier = Modifier.height(8.dp))
+
     if (currentState.entries.isEmpty()) {
         Text("No stock found!", color = ErrorRed, style = MaterialTheme.typography.titleMedium)
     } else {
@@ -139,9 +132,9 @@ fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.Inve
             modifier = Modifier.fillMaxWidth(0.85f)
         ) {
             Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Amount", color = Color.LightGray, fontWeight = FontWeight.Bold)
-                    Text("Expires", color = Color.LightGray, fontWeight = FontWeight.Bold)
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Text("Qty", color = Color.LightGray, fontWeight = FontWeight.Bold, modifier = Modifier.weight(0.3f))
+                    Text("Expires", color = Color.LightGray, fontWeight = FontWeight.Bold, modifier = Modifier.weight(0.7f))
                 }
                 HorizontalDivider(color = Color.Gray, modifier = Modifier.padding(vertical = 8.dp))
 
@@ -149,10 +142,10 @@ fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.Inve
                     items(currentState.entries) { entry ->
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             val amountStr = if (entry.amount % 1.0 == 0.0) entry.amount.toInt().toString() else entry.amount.toString()
-                            Text(amountStr, color = if (entry.open == 1) Color.Gray else Color.White)
+                            Text(amountStr, color = if (entry.open == 1) Color.Gray else Color.White, modifier = Modifier.weight(0.3f))
 
                             val dateStr = remember(entry.best_before_date) {
                                 if (entry.best_before_date == "2999-12-31" || entry.best_before_date.isNullOrEmpty()) {
@@ -180,7 +173,7 @@ fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.Inve
                             }
 
                             val dateColor = if (dateStr.startsWith("Expired")) ErrorRed else if (entry.open == 1) Color.Gray else Color.White
-                            Text(text = dateStr, color = dateColor)
+                            Text(text = dateStr, color = dateColor, modifier = Modifier.weight(0.7f))
                         }
                     }
                 }

@@ -61,6 +61,12 @@ data class AddStockRequest(
     val location_id: Int? = null
 )
 
+data class TransferStockRequest(
+    val amount: Double,
+    val location_id_to: Int,
+    val location_id_from: Int? = null
+)
+
 data class StockLogEntry(
     val id: Int,
     val product_id: Int,
@@ -82,5 +88,6 @@ data class StockEntry(
     val id: Int,
     val amount: Double,
     val best_before_date: String? = null,
-    val open: Int = 0
+    val open: Int = 0,
+    val location_id: Int? = null
 )

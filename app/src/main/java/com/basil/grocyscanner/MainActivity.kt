@@ -133,7 +133,7 @@ class MainActivity : ComponentActivity() {
 
                         val observer = LifecycleEventObserver { _, event ->
                             if (event == Lifecycle.Event.ON_RESUME) {
-                                context.registerReceiver(receiver, IntentFilter("com.basil.grocyscanner.SCAN"), Context.RECEIVER_EXPORTED)
+                                context.registerReceiver(receiver, IntentFilter("com.basil.grocyscanner.SCAN"), RECEIVER_EXPORTED)
                             } else if (event == Lifecycle.Event.ON_PAUSE) {
                                 context.unregisterReceiver(receiver)
                             }
@@ -185,6 +185,11 @@ class MainActivity : ComponentActivity() {
                                 resetDurationSeconds = duration
                                 sharedPrefs.edit { putInt("RESET_DURATION", duration) }
                             },
+                            viewModel = currentVm!!,
+                            onStartBatchMove = { locId, locName ->
+                                currentVm.startBatchMove(locId, locName)
+                                currentScreen = "scanner"
+                            },
                             onLogout = {
                                 sharedPrefs.edit { clear() }
                                 viewModel = null
@@ -222,7 +227,6 @@ class MainActivity : ComponentActivity() {
                     val oldBody = original.body
                     val newBody = object : RequestBody() {
                         override fun contentType() = "application/json".toMediaTypeOrNull()
-                        // FIXED: Override contentLength to avoid default chunked transfer encoding (-1 length)
                         override fun contentLength() = oldBody?.contentLength() ?: -1L
                         override fun writeTo(sink: BufferedSink) { oldBody?.writeTo(sink) }
                     }
