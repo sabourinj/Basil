@@ -23,6 +23,9 @@ interface GrocyApi {
     @POST("stock/products/{productId}/consume")
     suspend fun consumeStock(@Path("productId") productId: Int, @Body request: ConsumeStockRequest)
 
+    @POST("stock/products/{productId}/transfer")
+    suspend fun transferStock(@Path("productId") productId: Int, @Body request: TransferStockRequest)
+
     @POST("stock/products/{productId}/open")
     suspend fun openStock(@Path("productId") productId: Int, @Body request: OpenStockRequest)
 
@@ -52,6 +55,12 @@ interface GrocyApi {
 
     @GET("objects/product_barcodes")
     suspend fun getBarcodeDetails(@Query("query[]") query: String): List<BarcodeDetails>
+
+    @POST("objects/product_barcodes")
+    suspend fun addBarcode(@Body barcodeDetails: BarcodeDetails)
+
+    @PUT("objects/product_barcodes/{id}")
+    suspend fun updateBarcode(@Path("id") id: Int, @Body productData: @JvmSuppressWildcards Map<String, Any>)
 
     @GET("userfields/product_barcodes/{barcodeId}")
     suspend fun getBarcodeUserfields(@Path("barcodeId") barcodeId: Int): Map<String, Any>
