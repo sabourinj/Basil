@@ -152,28 +152,36 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             val response = api.getProductByBarcode(barcode)
             val product = response.product
 
-            val bDetails = fetchBarcodeDetails(barcode)
-            val moveAmount = response.barcode?.amount ?: bDetails?.amount ?: 1.0
+            // Find the actual current location of the stock that ISN'T the destination
+            val stockEntries = api.getStockEntries(product.id)
+            val sourceLocationId = stockEntries.firstOrNull { it.location_id != null && it.location_id != locationId }?.location_id 
+                ?: product.location_id
 
-            // 1. Update product's default location for future purchases
-            api.updateProduct(product.id, mapOf("location_id" to locationId, "name" to product.name))
-
-            // 2. Relocate stock - let Grocy pick the source automatically
+            // Relocate exactly one unit of stock
             api.transferStock(
                 product.id,
                 TransferStockRequest(
-                    amount = moveAmount,
-                    location_id_to = locationId
+                    amount = 1.0,
+                    location_id_to = locationId,
+                    location_id_from = sourceLocationId
                 )
             )
 
+            val sourceLocName = _locations.value.find { it.id == sourceLocationId }?.name ?: "Unknown"
+
             _state.value = AppState.Success(
                 message = "Moved!",
-                stockMessage = "${product.name} relocated to $locationName",
+                stockMessage = "1 unit of ${product.name} relocated from $sourceLocName to $locationName",
                 product = product,
                 lastScannedBarcode = barcode,
-                addedAmount = moveAmount
+                addedAmount = 1.0
             )
+        } catch (e: HttpException) {
+            if (e.code() == 400) {
+                _state.value = AppState.Error("Product not found.")
+            } else {
+                _state.value = AppState.Error("Move failed: HTTP ${e.code()}")
+            }
         } catch (e: Exception) {
             Log.e("BasilDebug", "Batch Move failed", e)
             _state.value = AppState.Error("Move failed: ${e.message}")
@@ -199,7 +207,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             scanAmount = response.barcode?.amount ?: bDetails?.amount ?: 1.0
             barcodeId = response.barcode?.id ?: bDetails?.id
         } catch (e: HttpException) {
-            if (_currentMode.value == AppMode.INVENTORY || _currentMode.value == AppMode.CONSUME) {
+            if (_currentMode.value == AppMode.INVENTORY || _currentMode.value == AppMode.CONSUME || e.code() == 400) {
                 _state.value = AppState.Error("Product not found.")
                 return
             }
@@ -219,6 +227,13 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 scanAmount = newResponse.barcode?.amount ?: bDetails?.amount ?: 1.0
                 barcodeId = newResponse.barcode?.id ?: bDetails?.id
                 isNewlyAdded = true
+            } catch (e: HttpException) {
+                if (e.code() == 400) {
+                    _state.value = AppState.Error("Product not found.")
+                } else {
+                    _state.value = AppState.Error("HTTP ${e.code()}: Unable to identify product.")
+                }
+                return
             } catch (_: Exception) {
                 _state.value = AppState.Error("Unable to identify product.\nAdd manually in Grocy.")
                 return
