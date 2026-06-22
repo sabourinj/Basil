@@ -69,7 +69,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.basil.grocyscanner.R
-import com.basil.grocyscanner.data.ProductDetails
 import com.basil.grocyscanner.ui.theme.DarkerHeaderPurple
 import com.basil.grocyscanner.ui.theme.DeepPurple
 import com.basil.grocyscanner.ui.theme.ErrorRed
@@ -191,7 +190,16 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                     ReadyToScanBox(width = 220.dp, height = 130.dp, fontSize = 18.sp)
                 }
                 is ScannerViewModel.AppState.Loading -> {
-                    CircularProgressIndicator(modifier = Modifier.size(64.dp), strokeWidth = 6.dp, color = Color.White)
+                    Box(contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(modifier = Modifier.size(100.dp), strokeWidth = 2.dp, color = Color.White.copy(alpha = 0.5f))
+                        if (currentState.showGemini) {
+                            Image(painter = painterResource(id = R.drawable.gemini_logo), contentDescription = null, modifier = Modifier.size(48.dp))
+                        } else if (currentState.showOff) {
+                            Image(painter = painterResource(id = R.drawable.openfoodfacts_logo), contentDescription = null, modifier = Modifier.size(48.dp))
+                        } else if (currentState.showGrocy) {
+                            Image(painter = painterResource(id = R.drawable.grocy_g_logo), contentDescription = null, modifier = Modifier.size(48.dp))
+                        }
+                    }
                     Spacer(modifier = Modifier.height(24.dp))
                     Text(currentState.message, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center, color = Color.White)
                 }

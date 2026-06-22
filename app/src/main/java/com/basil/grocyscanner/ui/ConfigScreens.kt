@@ -84,7 +84,7 @@ fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
             Image(
                 painter = painterResource(id = R.drawable.gemini_logo),
                 contentDescription = "Gemini Logo",
-                modifier = Modifier.size(80.dp)
+                modifier = Modifier.size(120.dp)
             )
             Spacer(modifier = Modifier.height(24.dp))
 
@@ -106,7 +106,7 @@ fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
             Image(
                 painter = painterResource(id = R.drawable.gemini_logo),
                 contentDescription = "Gemini Logo",
-                modifier = Modifier.size(80.dp)
+                modifier = Modifier.size(120.dp)
             )
             Spacer(modifier = Modifier.height(24.dp))
             Text("API Key Required", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
@@ -121,7 +121,7 @@ fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
 @Composable
 fun UnconfiguredScreen() {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Image(painter = painterResource(id = R.drawable.grocy_logo), contentDescription = "Grocy Logo", modifier = Modifier.size(120.dp))
+        Image(painter = painterResource(id = R.drawable.grocy_logo), contentDescription = "Grocy Logo", modifier = Modifier.size(180.dp))
         Text("API Key Required", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(16.dp))
         Text("1. Generate an API Key in Grocy.\n2. Click the Show QR Code button.\n3. Scan the QR code displayed.", textAlign = TextAlign.Left, color = Color.LightGray)
@@ -188,11 +188,11 @@ fun SettingsScreen(
             Text(text = "Basil", style = MaterialTheme.typography.headlineLarge, color = Color.White, fontWeight = FontWeight.Bold)
             Text(text = "v${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.titleMedium, color = Color.LightGray)
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
             // Settings Group 1: Behavior
-            Text("App Behavior", style = MaterialTheme.typography.labelLarge, color = SuccessGreen, modifier = Modifier.fillMaxWidth(0.8f))
-            Spacer(modifier = Modifier.height(8.dp))
+            //Text("App Behavior", style = MaterialTheme.typography.labelLarge, color = SuccessGreen, modifier = Modifier.fillMaxWidth(0.8f))
+            //Spacer(modifier = Modifier.height(8.dp))
             
             Row(
                 modifier = Modifier.fillMaxWidth(0.8f),

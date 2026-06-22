@@ -30,7 +30,12 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
 
     sealed class AppState {
         object Idle : AppState()
-        data class Loading(val message: String = "Communicating with Grocy...") : AppState()
+        data class Loading(
+            val message: String = "Communicating with Grocy...",
+            val showGemini: Boolean = false,
+            val showOff: Boolean = false,
+            val showGrocy: Boolean = false
+        ) : AppState()
         data class NeedsDate(val product: ProductDetails, val estimatedPrice: Double? = null, val amount: Double = 1.0, val autoPrint: Boolean = false) : AppState()
         data class Success(
             val message: String,
@@ -139,53 +144,35 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
     }
 
     private suspend fun processBatchMove(barcode: String) {
-        val targetLocationId = batchMoveLocationId ?: return
-        val targetLocationName = batchMoveLocationName ?: ""
+        val locationId = batchMoveLocationId ?: return
+        val locationName = batchMoveLocationName ?: ""
         
-        _state.value = AppState.Loading("Moving product to $targetLocationName...")
+        _state.value = AppState.Loading("Moving product to $locationName...", showGrocy = true)
         try {
             val response = api.getProductByBarcode(barcode)
             val product = response.product
-            val currentStock = response.stock_amount ?: 0.0
-            
+
             val bDetails = fetchBarcodeDetails(barcode)
-            val scanAmount = response.barcode?.amount ?: bDetails?.amount ?: 1.0
+            val moveAmount = response.barcode?.amount ?: bDetails?.amount ?: 1.0
 
-            // 1. Get current stock entries to find source locations
-            val stockEntries = api.getStockEntries(product.id)
-            val entryToMoveFrom = stockEntries.firstOrNull { it.location_id != targetLocationId }
+            // 1. Update product's default location for future purchases
+            api.updateProduct(product.id, mapOf("location_id" to locationId, "name" to product.name))
 
-            // 2. Relocate stock - only if there is stock to move from a different location
-            if (currentStock > 0 && entryToMoveFrom != null) {
-                val amountToMove = Math.min(currentStock, scanAmount)
-                try {
-                    api.transferStock(
-                        product.id,
-                        TransferStockRequest(
-                            amount = amountToMove,
-                            location_id_to = targetLocationId,
-                            location_id_from = entryToMoveFrom.location_id
-                        )
-                    )
-                } catch (e: HttpException) {
-                    if (e.code() != 400) throw e
-                    Log.w("BasilDebug", "Stock transfer failed with 400 (likely no stock in transferable source): ${e.message}")
-                }
-            }
+            // 2. Relocate stock - let Grocy pick the source automatically
+            api.transferStock(
+                product.id,
+                TransferStockRequest(
+                    amount = moveAmount,
+                    location_id_to = locationId
+                )
+            )
 
-            // 3. Update product's default location for future purchases
-            try {
-                api.updateProduct(product.id, mapOf("location_id" to targetLocationId, "name" to product.name))
-            } catch (e: Exception) {
-                Log.w("BasilDebug", "Product default location update failed: ${e.message}")
-            }
-            
             _state.value = AppState.Success(
                 message = "Moved!",
-                stockMessage = "${product.name} relocated to $targetLocationName",
+                stockMessage = "${product.name} relocated to $locationName",
                 product = product,
                 lastScannedBarcode = barcode,
-                addedAmount = scanAmount
+                addedAmount = moveAmount
             )
         } catch (e: Exception) {
             Log.e("BasilDebug", "Batch Move failed", e)
@@ -194,7 +181,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
     }
 
     private suspend fun identifyAndProcessBarcode(barcode: String, isRetry: Boolean = false) {
-        _state.value = AppState.Loading("Identifying product...")
+        _state.value = AppState.Loading("Identifying product...", showGrocy = true)
         if (!isRetry) delay(150)
 
         var isNewlyAdded = false
@@ -217,7 +204,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 return
             }
 
-            _state.value = AppState.Loading("Looking up product...")
+            _state.value = AppState.Loading("Looking up product...", showOff = true)
             try {
                 api.externalBarcodeLookup(barcode, true)
             } catch (_: Exception) {
@@ -243,11 +230,11 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
 
         currentProduct?.let { product ->
             if (isNewlyAdded && generativeModel != null) {
-                _state.value = AppState.Loading("Analyzing product...")
+                _state.value = AppState.Loading("Analyzing product...", showGemini = true)
                 enrichProductWithGemini(product.id, product.name)
 
                 try {
-                    _state.value = AppState.Loading("Creating new product...")
+                    _state.value = AppState.Loading("Creating new product...", showGrocy = true)
                     val updatedResponse = api.getProductByBarcode(barcode)
                     val bDetails = fetchBarcodeDetails(barcode)
                     processFoundProduct(updatedResponse.product, knownPrice, updatedResponse.barcode?.amount ?: bDetails?.amount ?: 1.0, updatedResponse.barcode?.id ?: bDetails?.id, barcode)
@@ -316,7 +303,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         when (_currentMode.value) {
             AppMode.INVENTORY -> {
                 try {
-                    _state.value = AppState.Loading("Checking inventory...")
+                    _state.value = AppState.Loading("Checking inventory...", showGrocy = true)
                     val rawEntries = api.getStockEntries(product.id)
                     val canOpen = rawEntries.any { it.open == 0 }
                     val groupedEntries = rawEntries
@@ -342,7 +329,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
 
                 if (estimatedPrice == null || estimatedPrice <= 0.0) {
                     if (generativeModel != null) {
-                        _state.value = AppState.Loading("Estimating price...")
+                        _state.value = AppState.Loading("Estimating price...", showGemini = true)
                         try {
                             val pricePrompt = "Estimate the current USD price of '${product.name}'. Return a JSON object with a single key 'price' containing a float value."
                             val response = generativeModel?.generateContent(pricePrompt)
@@ -393,7 +380,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         isProcessingAction = true
 
         viewModelScope.launch {
-            _state.value = AppState.Loading(if (_currentMode.value == AppMode.PURCHASE) "Adding stock..." else "Consuming stock...")
+            _state.value = AppState.Loading(if (_currentMode.value == AppMode.PURCHASE) "Adding stock..." else "Consuming stock...", showGrocy = true)
             var lastStockUuid: String? = null
 
             try {
