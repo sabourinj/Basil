@@ -139,35 +139,53 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
     }
 
     private suspend fun processBatchMove(barcode: String) {
-        val locationId = batchMoveLocationId ?: return
-        val locationName = batchMoveLocationName ?: ""
+        val targetLocationId = batchMoveLocationId ?: return
+        val targetLocationName = batchMoveLocationName ?: ""
         
-        _state.value = AppState.Loading("Moving product to $locationName...")
+        _state.value = AppState.Loading("Moving product to $targetLocationName...")
         try {
             val response = api.getProductByBarcode(barcode)
             val product = response.product
+            val currentStock = response.stock_amount ?: 0.0
             
             val bDetails = fetchBarcodeDetails(barcode)
-            val moveAmount = response.barcode?.amount ?: bDetails?.amount ?: 1.0
+            val scanAmount = response.barcode?.amount ?: bDetails?.amount ?: 1.0
 
-            // 1. Update product's default location for future purchases
-            api.updateProduct(product.id, mapOf("location_id" to locationId, "name" to product.name))
-            
-            // 2. Relocate stock - let Grocy pick the source automatically
-            api.transferStock(
-                product.id,
-                TransferStockRequest(
-                    amount = moveAmount,
-                    location_id_to = locationId
-                )
-            )
+            // 1. Get current stock entries to find source locations
+            val stockEntries = api.getStockEntries(product.id)
+            val entryToMoveFrom = stockEntries.firstOrNull { it.location_id != targetLocationId }
+
+            // 2. Relocate stock - only if there is stock to move from a different location
+            if (currentStock > 0 && entryToMoveFrom != null) {
+                val amountToMove = Math.min(currentStock, scanAmount)
+                try {
+                    api.transferStock(
+                        product.id,
+                        TransferStockRequest(
+                            amount = amountToMove,
+                            location_id_to = targetLocationId,
+                            location_id_from = entryToMoveFrom.location_id
+                        )
+                    )
+                } catch (e: HttpException) {
+                    if (e.code() != 400) throw e
+                    Log.w("BasilDebug", "Stock transfer failed with 400 (likely no stock in transferable source): ${e.message}")
+                }
+            }
+
+            // 3. Update product's default location for future purchases
+            try {
+                api.updateProduct(product.id, mapOf("location_id" to targetLocationId, "name" to product.name))
+            } catch (e: Exception) {
+                Log.w("BasilDebug", "Product default location update failed: ${e.message}")
+            }
             
             _state.value = AppState.Success(
                 message = "Moved!",
-                stockMessage = "${product.name} relocated to $locationName",
+                stockMessage = "${product.name} relocated to $targetLocationName",
                 product = product,
                 lastScannedBarcode = barcode,
-                addedAmount = moveAmount
+                addedAmount = scanAmount
             )
         } catch (e: Exception) {
             Log.e("BasilDebug", "Batch Move failed", e)
