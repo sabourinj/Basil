@@ -65,7 +65,7 @@ fun ExpirationDatePrompt(
     var isFlashing by remember { mutableStateOf(false) }
     val borderColor by animateColorAsState(
         targetValue = if (isFlashing) ErrorRed else Color.White,
-        animationSpec = tween(durationMillis = 100),
+        animationSpec = tween(durationMillis = 200),
         label = "borderFlash"
     )
 
@@ -73,9 +73,9 @@ fun ExpirationDatePrompt(
         if (scanErrorTrigger > 0) {
             repeat(10) {
                 isFlashing = true
-                delay(150)
+                delay(300)
                 isFlashing = false
-                delay(100)
+                delay(200)
             }
         }
     }
