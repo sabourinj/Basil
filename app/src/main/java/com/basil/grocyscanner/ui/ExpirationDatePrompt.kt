@@ -1,5 +1,7 @@
 package com.basil.grocyscanner.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -22,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,7 +39,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.basil.grocyscanner.data.ProductDetails
 import com.basil.grocyscanner.ui.theme.DeepPurple
+import com.basil.grocyscanner.ui.theme.ErrorRed
 import com.basil.grocyscanner.ui.theme.SuccessGreen
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -45,6 +50,7 @@ import java.util.Locale
 fun ExpirationDatePrompt(
     product: ProductDetails,
     estimatedPrice: Double?,
+    scanErrorTrigger: Long = 0L,
     onSubmit: (String) -> Unit,
     onCancel: () -> Unit
 ) {
@@ -52,10 +58,26 @@ fun ExpirationDatePrompt(
         mutableStateOf(Calendar.getInstance().apply {
             if (product.default_best_before_days > 0) {
                 add(Calendar.DAY_OF_YEAR, product.default_best_before_days)
-            } else {
-                add(Calendar.DAY_OF_YEAR, 7)
             }
         })
+    }
+
+    var isFlashing by remember { mutableStateOf(false) }
+    val borderColor by animateColorAsState(
+        targetValue = if (isFlashing) ErrorRed else Color.White,
+        animationSpec = tween(durationMillis = 200),
+        label = "borderFlash"
+    )
+
+    LaunchedEffect(scanErrorTrigger) {
+        if (scanErrorTrigger > 0) {
+            repeat(3) {
+                isFlashing = true
+                delay(150)
+                isFlashing = false
+                delay(100)
+            }
+        }
     }
 
     val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
@@ -66,7 +88,7 @@ fun ExpirationDatePrompt(
         Surface(
             shape = RoundedCornerShape(16.dp),
             color = DeepPurple,
-            border = BorderStroke(2.dp, Color.White)
+            border = BorderStroke(2.dp, borderColor)
         ) {
             Column(
                 modifier = Modifier.padding(20.dp),
@@ -94,19 +116,19 @@ fun ExpirationDatePrompt(
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Day
-                    DatePartSelector(
-                        label = "Day",
-                        value = selectedCalendar.get(Calendar.DAY_OF_MONTH).toString(),
-                        onIncrement = { selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, 1) } },
-                        onDecrement = { selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, -1) } }
-                    )
                     // Month
                     DatePartSelector(
                         label = "Month",
                         value = monthSdf.format(selectedCalendar.time).take(3),
                         onIncrement = { selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.MONTH, 1) } },
                         onDecrement = { selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.MONTH, -1) } }
+                    )
+                    // Day
+                    DatePartSelector(
+                        label = "Day",
+                        value = selectedCalendar.get(Calendar.DAY_OF_MONTH).toString(),
+                        onIncrement = { selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, 1) } },
+                        onDecrement = { selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, -1) } }
                     )
                     // Year
                     DatePartSelector(

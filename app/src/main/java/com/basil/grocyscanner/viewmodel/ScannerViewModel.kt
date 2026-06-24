@@ -36,7 +36,13 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             val showOff: Boolean = false,
             val showGrocy: Boolean = false
         ) : AppState()
-        data class NeedsDate(val product: ProductDetails, val estimatedPrice: Double? = null, val amount: Double = 1.0, val autoPrint: Boolean = false) : AppState()
+        data class NeedsDate(
+            val product: ProductDetails,
+            val estimatedPrice: Double? = null,
+            val amount: Double = 1.0,
+            val autoPrint: Boolean = false,
+            val scanErrorTrigger: Long = 0L
+        ) : AppState()
         data class Success(
             val message: String,
             val stockMessage: String = "",
@@ -120,6 +126,10 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         }
 
         val currentState = _state.value
+        if (currentState is AppState.NeedsDate) {
+            _state.value = currentState.copy(scanErrorTrigger = System.currentTimeMillis())
+            return
+        }
         if (currentState is AppState.LinkingChild) {
             _state.value = AppState.ChildQuantityPrompt(currentState.product, currentState.parentBarcode, barcode)
             return
@@ -406,7 +416,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                         _state.value = AppState.NeedsDate(product, estimatedPrice, amount, autoPrint)
                     }
                     "ai_estimate" -> {
-                        val daysToAdd = if (shelfLife > 0) shelfLife.toLong() else 7L
+                        val daysToAdd = shelfLife.toLong()
                         val autoCalculatedDate = LocalDate.now().plusDays(daysToAdd).format(
                             DateTimeFormatter.ISO_LOCAL_DATE)
                         confirmAction(product.id, amount, autoCalculatedDate, estimatedPrice, autoPrint, scannedBarcode)
