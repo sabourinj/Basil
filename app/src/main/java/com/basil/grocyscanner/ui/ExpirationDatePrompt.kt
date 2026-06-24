@@ -1,121 +1,236 @@
 package com.basil.grocyscanner.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.basil.grocyscanner.data.ProductDetails
 import com.basil.grocyscanner.ui.theme.DeepPurple
+import com.basil.grocyscanner.ui.theme.ErrorRed
+import com.basil.grocyscanner.ui.theme.SuccessGreen
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Calendar
-import java.util.Date
 import java.util.Locale
 
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExpirationDatePrompt(
     product: ProductDetails,
     estimatedPrice: Double?,
+    scanErrorTrigger: Long = 0L,
     onSubmit: (String) -> Unit,
     onCancel: () -> Unit
 ) {
-    val defaultMillis = remember {
-        if (product.default_best_before_days > 0) {
-            Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, product.default_best_before_days) }.timeInMillis
-        } else {
-            System.currentTimeMillis()
+    var selectedCalendar by remember {
+        mutableStateOf(Calendar.getInstance().apply {
+            if (product.default_best_before_days > 0) {
+                add(Calendar.DAY_OF_YEAR, product.default_best_before_days)
+            }
+        })
+    }
+
+    var isFlashing by remember { mutableStateOf(false) }
+    val borderColor by animateColorAsState(
+        targetValue = if (isFlashing) ErrorRed else Color.White,
+        animationSpec = tween(durationMillis = 200),
+        label = "borderFlash"
+    )
+
+    LaunchedEffect(scanErrorTrigger) {
+        if (scanErrorTrigger > 0) {
+            repeat(10) {
+                isFlashing = true
+                delay(300)
+                isFlashing = false
+                delay(200)
+            }
         }
     }
 
-    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = defaultMillis)
+    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    val monthSdf = SimpleDateFormat("MMMM", Locale.getDefault())
+    val yearSdf = SimpleDateFormat("yyyy", Locale.getDefault())
 
-    Dialog(
-        onDismissRequest = onCancel,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
+    Dialog(onDismissRequest = onCancel) {
         Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = Color.White,
-            modifier = Modifier
-                .padding(16.dp)
-                .fillMaxWidth()
-                .wrapContentHeight()
+            shape = RoundedCornerShape(16.dp),
+            color = DeepPurple,
+            border = BorderStroke(2.dp, borderColor)
         ) {
             Column(
-                modifier = Modifier.padding(16.dp),
+                modifier = Modifier.padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text("Set Expiration for:", style = MaterialTheme.typography.titleMedium, color = Color.Gray)
-                Text(product.name, style = MaterialTheme.typography.titleSmall, color = DeepPurple, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "Set Expiration",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = product.name,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.LightGray,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1
+                )
 
-                val currentDensity = LocalDensity.current
-                CompositionLocalProvider(
-                    LocalDensity provides Density(
-                        density = currentDensity.density * 0.7f
-                    )
-                ) {
-                    DatePicker(
-                        state = datePickerState,
-                        title = null,
-                        headline = null,
-                        showModeToggle = false,
-                        modifier = Modifier.weight(1f, fill = false),
-                        colors = DatePickerDefaults.colors(
-                            selectedDayContainerColor = DeepPurple,
-                            selectedDayContentColor = Color.White,
-                            todayContentColor = DeepPurple,
-                            todayDateBorderColor = DeepPurple
-                        )
-                    )
-                }
+                Spacer(modifier = Modifier.height(16.dp))
 
+                // Precise Date Selector (US Format: Month Day Year)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(onClick = onCancel) {
-                        Text("Cancel", color = Color.Gray)
+                    // Month
+                    DatePartSelector(
+                        value = monthSdf.format(selectedCalendar.time).take(3),
+                        onIncrement = { selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.MONTH, 1) } },
+                        onDecrement = { selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.MONTH, -1) } }
+                    )
+                    // Day
+                    DatePartSelector(
+                        value = selectedCalendar.get(Calendar.DAY_OF_MONTH).toString(),
+                        onIncrement = { selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, 1) } },
+                        onDecrement = { selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, -1) } }
+                    )
+                    // Year
+                    DatePartSelector(
+                        value = yearSdf.format(selectedCalendar.time),
+                        onIncrement = { selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.YEAR, 1) } },
+                        onDecrement = { selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.YEAR, -1) } }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Quick Adjustment Grid (Smaller)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        DateAdjustButton("+1d", Modifier.weight(1f)) {
+                            selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, 1) }
+                        }
+                        DateAdjustButton("+1w", Modifier.weight(1f)) {
+                            selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.WEEK_OF_YEAR, 1) }
+                        }
+                        DateAdjustButton("+1m", Modifier.weight(1f)) {
+                            selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.MONTH, 1) }
+                        }
+                        DateAdjustButton("+1y", Modifier.weight(1f)) {
+                            selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.YEAR, 1) }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Button(
+                        onClick = onCancel,
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DeepPurple)
+                    ) {
+                        Text("Cancel", fontWeight = FontWeight.Bold)
                     }
                     Button(
-                        onClick = {
-                            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-                            val finalDate = datePickerState.selectedDateMillis?.let { sdf.format(Date(it)) } ?: ""
-                            onSubmit(finalDate)
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = DeepPurple, contentColor = Color.White)
+                        onClick = { onSubmit(sdf.format(selectedCalendar.time)) },
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = DeepPurple)
                     ) {
-                        Text("Save to Stock", fontWeight = FontWeight.Bold)
+                        Text("Save", fontWeight = FontWeight.Bold)
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+fun DatePartSelector(value: String, onIncrement: () -> Unit, onDecrement: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        IconButton(
+            onClick = onIncrement,
+            modifier = Modifier.size(44.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = null,
+                tint = SuccessGreen,
+                modifier = Modifier.size(28.dp)
+            )
+        }
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleLarge.copy(fontSize = 22.sp),
+            color = Color.White,
+            fontWeight = FontWeight.Bold
+        )
+        IconButton(
+            onClick = onDecrement,
+            modifier = Modifier.size(44.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Remove,
+                contentDescription = null,
+                tint = SuccessGreen,
+                modifier = Modifier.size(28.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun DateAdjustButton(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        modifier = modifier.height(40.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+        shape = RoundedCornerShape(8.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Color.White.copy(alpha = 0.05f),
+            contentColor = Color.White
+        ),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+    ) {
+        Text(label, style = MaterialTheme.typography.bodySmall)
     }
 }
