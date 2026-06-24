@@ -106,7 +106,18 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                     vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
                 }
             }
-            is ScannerViewModel.AppState.NeedsDate, is ScannerViewModel.AppState.Error, is ScannerViewModel.AppState.LinkingChild -> {
+            is ScannerViewModel.AppState.NeedsDate -> {
+                if (currentState.scanErrorTrigger > 0) {
+                    // Very strong 5-pulse error haptic, spread out
+                    val pattern = longArrayOf(0, 250, 200, 250, 200, 250, 200, 250, 200, 250)
+                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                } else {
+                    // Initial prompt haptic
+                    val pattern = longArrayOf(0, 150, 100, 150)
+                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                }
+            }
+            is ScannerViewModel.AppState.Error, is ScannerViewModel.AppState.LinkingChild -> {
                 val pattern = longArrayOf(0, 150, 100, 150)
                 vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
             }
@@ -206,6 +217,7 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                     ExpirationDatePrompt(
                         product = currentState.product,
                         estimatedPrice = currentState.estimatedPrice,
+                        scanErrorTrigger = currentState.scanErrorTrigger,
                         onSubmit = { date ->
                             viewModel.confirmAction(currentState.product.id, currentState.amount, date, currentState.estimatedPrice, currentState.autoPrint)
                         },

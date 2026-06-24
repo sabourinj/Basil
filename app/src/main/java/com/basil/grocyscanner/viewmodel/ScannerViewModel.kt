@@ -36,7 +36,13 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             val showOff: Boolean = false,
             val showGrocy: Boolean = false
         ) : AppState()
-        data class NeedsDate(val product: ProductDetails, val estimatedPrice: Double? = null, val amount: Double = 1.0, val autoPrint: Boolean = false) : AppState()
+        data class NeedsDate(
+            val product: ProductDetails,
+            val estimatedPrice: Double? = null,
+            val amount: Double = 1.0,
+            val autoPrint: Boolean = false,
+            val scanErrorTrigger: Long = 0L
+        ) : AppState()
         data class Success(
             val message: String,
             val stockMessage: String = "",
@@ -120,6 +126,10 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         }
 
         val currentState = _state.value
+        if (currentState is AppState.NeedsDate) {
+            _state.value = currentState.copy(scanErrorTrigger = System.currentTimeMillis())
+            return
+        }
         if (currentState is AppState.LinkingChild) {
             _state.value = AppState.ChildQuantityPrompt(currentState.product, currentState.parentBarcode, barcode)
             return
@@ -146,39 +156,71 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
     private suspend fun processBatchMove(barcode: String) {
         val locationId = batchMoveLocationId ?: return
         val locationName = batchMoveLocationName ?: ""
+        var currentProduct: ProductDetails? = null
         
         _state.value = AppState.Loading("Moving product to $locationName...", showGrocy = true)
         try {
             val response = api.getProductByBarcode(barcode)
             val product = response.product
+            currentProduct = product
+
+            // Determine how much the barcode is "worth" (e.g. 12 for a multipack)
+            val bDetails = fetchBarcodeDetails(barcode)
+            val barcodeQuantity = response.barcode?.amount ?: bDetails?.amount ?: 1.0
 
             // Find the actual current location of the stock that ISN'T the destination
             val stockEntries = api.getStockEntries(product.id)
-            val sourceLocationId = stockEntries.firstOrNull { it.location_id != null && it.location_id != locationId }?.location_id 
-                ?: product.location_id
+            
+            // Calculate total available to move (anything NOT at the destination)
+            val availableOutsideDestination = stockEntries.filter { it.location_id != locationId }
+            val totalAvailableToMove = availableOutsideDestination.sumOf { it.amount }
 
-            // Relocate exactly one unit of stock
+            if (totalAvailableToMove <= 0) {
+                _state.value = AppState.Error("No stock found outside of $locationName.")
+                return
+            }
+
+            // Determine how much to move: the barcode amount, or whatever we have available
+            val moveAmount = minOf(barcodeQuantity, totalAvailableToMove)
+
+            // Pick the first source location that has stock
+            val sourceEntry = availableOutsideDestination.firstOrNull { it.amount > 0 }
+            val sourceLocationId = sourceEntry?.location_id ?: product.location_id
+
+            if (sourceLocationId == null) {
+                _state.value = AppState.Error("Unable to determine source location.")
+                return
+            }
+
+            // Relocate the stock
             api.transferStock(
                 product.id,
                 TransferStockRequest(
-                    amount = 1.0,
+                    amount = moveAmount,
                     location_id_to = locationId,
                     location_id_from = sourceLocationId
                 )
             )
 
             val sourceLocName = _locations.value.find { it.id == sourceLocationId }?.name ?: "Unknown"
+            val amountStr = if (moveAmount % 1.0 == 0.0) moveAmount.toInt().toString() else moveAmount.toString()
 
             _state.value = AppState.Success(
                 message = "Moved!",
-                stockMessage = "1 unit of ${product.name} relocated from $sourceLocName to $locationName",
+                stockMessage = "$amountStr units of ${product.name} relocated from $sourceLocName to $locationName",
                 product = product,
                 lastScannedBarcode = barcode,
-                addedAmount = 1.0
+                addedAmount = moveAmount
             )
         } catch (e: HttpException) {
+            val errorBody = e.response()?.errorBody()?.string() ?: ""
+            Log.e("BasilDebug", "Batch Move HTTP Error ${e.code()}: $errorBody")
+
             if (e.code() == 400) {
                 _state.value = AppState.Error("Product not found.")
+            } else if (e.code() == 405) {
+                val detail = if (currentProduct?.is_parent == 1) " (Parent Product)" else ""
+                _state.value = AppState.Error("Move not allowed$detail. Check Grocy product settings.")
             } else {
                 _state.value = AppState.Error("Move failed: HTTP ${e.code()}")
             }
@@ -207,7 +249,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             scanAmount = response.barcode?.amount ?: bDetails?.amount ?: 1.0
             barcodeId = response.barcode?.id ?: bDetails?.id
         } catch (e: HttpException) {
-            if (_currentMode.value == AppMode.INVENTORY || _currentMode.value == AppMode.CONSUME || e.code() == 400) {
+            if (_currentMode.value == AppMode.INVENTORY || _currentMode.value == AppMode.CONSUME) {
                 _state.value = AppState.Error("Product not found.")
                 return
             }
@@ -374,7 +416,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                         _state.value = AppState.NeedsDate(product, estimatedPrice, amount, autoPrint)
                     }
                     "ai_estimate" -> {
-                        val daysToAdd = if (shelfLife > 0) shelfLife.toLong() else 7L
+                        val daysToAdd = shelfLife.toLong()
                         val autoCalculatedDate = LocalDate.now().plusDays(daysToAdd).format(
                             DateTimeFormatter.ISO_LOCAL_DATE)
                         confirmAction(product.id, amount, autoCalculatedDate, estimatedPrice, autoPrint, scannedBarcode)

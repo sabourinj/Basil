@@ -110,7 +110,7 @@ fun ExpirationDatePrompt(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Precise Date Selector (US Format: Month Day Year)
+                // Precise Date Selector
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
