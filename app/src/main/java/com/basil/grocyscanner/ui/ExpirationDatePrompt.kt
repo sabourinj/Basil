@@ -118,21 +118,18 @@ fun ExpirationDatePrompt(
                 ) {
                     // Month
                     DatePartSelector(
-                        label = "Month",
                         value = monthSdf.format(selectedCalendar.time).take(3),
                         onIncrement = { selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.MONTH, 1) } },
                         onDecrement = { selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.MONTH, -1) } }
                     )
                     // Day
                     DatePartSelector(
-                        label = "Day",
                         value = selectedCalendar.get(Calendar.DAY_OF_MONTH).toString(),
                         onIncrement = { selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, 1) } },
                         onDecrement = { selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, -1) } }
                     )
                     // Year
                     DatePartSelector(
-                        label = "Year",
                         value = yearSdf.format(selectedCalendar.time),
                         onIncrement = { selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.YEAR, 1) } },
                         onDecrement = { selectedCalendar = (selectedCalendar.clone() as Calendar).apply { add(Calendar.YEAR, -1) } }
@@ -188,20 +185,35 @@ fun ExpirationDatePrompt(
 }
 
 @Composable
-fun DatePartSelector(label: String, value: String, onIncrement: () -> Unit, onDecrement: () -> Unit) {
+fun DatePartSelector(value: String, onIncrement: () -> Unit, onDecrement: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-        IconButton(onClick = onIncrement, modifier = Modifier.size(32.dp)) {
-            Icon(Icons.Default.Add, contentDescription = null, tint = SuccessGreen)
+        IconButton(
+            onClick = onIncrement,
+            modifier = Modifier.size(44.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = null,
+                tint = SuccessGreen,
+                modifier = Modifier.size(28.dp)
+            )
         }
         Text(
             text = value,
-            style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
+            style = MaterialTheme.typography.titleLarge.copy(fontSize = 22.sp),
             color = Color.White,
             fontWeight = FontWeight.Bold
         )
-        IconButton(onClick = onDecrement, modifier = Modifier.size(32.dp)) {
-            Icon(Icons.Default.Remove, contentDescription = null, tint = Color.LightGray)
+        IconButton(
+            onClick = onDecrement,
+            modifier = Modifier.size(44.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Remove,
+                contentDescription = null,
+                tint = SuccessGreen,
+                modifier = Modifier.size(28.dp)
+            )
         }
     }
 }
