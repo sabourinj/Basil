@@ -16,7 +16,8 @@ data class ProductDetails(
     val default_best_before_days: Int = 0,
     val default_price: Double? = null,
     val stock_amount: Double? = null,
-    val picture_file_name: String? = null
+    val picture_file_name: String? = null,
+    val is_parent: Int? = 0
 )
 
 data class BarcodeDetails(
