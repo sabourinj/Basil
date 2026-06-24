@@ -9,7 +9,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -297,75 +296,13 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                     }
                 }
                 is ScannerViewModel.AppState.ChildQuantityPrompt -> {
-                    var showCustomDialog by remember { mutableStateOf(false) }
-                    var customValue by remember { mutableStateOf("") }
-
-                    Text("How many items are in the box?", style = MaterialTheme.typography.headlineSmall, color = Color.White, textAlign = TextAlign.Center)
-                    Spacer(modifier = Modifier.height(32.dp))
-                    Column(verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            QuantityButton("6") { viewModel.confirmChildLink(currentState.product.id, currentState.parentBarcode, currentState.childBarcode, 6.0) }
-                            QuantityButton("12") { viewModel.confirmChildLink(currentState.product.id, currentState.parentBarcode, currentState.childBarcode, 12.0) }
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            QuantityButton("24") { viewModel.confirmChildLink(currentState.product.id, currentState.parentBarcode, currentState.childBarcode, 24.0) }
-                            QuantityButton("Custom") { showCustomDialog = true }
-                        }
-                        Spacer(modifier = Modifier.height(32.dp))
-                        Button(
-                            onClick = { viewModel.resetState() },
-                            modifier = Modifier.fillMaxWidth(0.8f).height(56.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DeepPurple)
-                        ) {
-                            Text("Cancel", fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    if (showCustomDialog) {
-                        Dialog(onDismissRequest = { showCustomDialog = false }) {
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = DeepPurple,
-                                border = BorderStroke(2.dp, Color.White)
-                            ) {
-                                Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text("Enter Quantity", style = MaterialTheme.typography.titleLarge, color = Color.White)
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    TextField(
-                                        value = customValue,
-                                        onValueChange = { if (it.all { char -> char.isDigit() }) customValue = it },
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                        modifier = Modifier.fillMaxWidth(),
-                                        singleLine = true,
-                                        colors = TextFieldDefaults.colors(
-                                            focusedContainerColor = Color.White.copy(alpha = 0.1f),
-                                            unfocusedContainerColor = Color.Transparent,
-                                            focusedTextColor = Color.White,
-                                            unfocusedTextColor = Color.White
-                                        )
-                                    )
-                                    Spacer(modifier = Modifier.height(24.dp))
-                                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                                        TextButton(onClick = { showCustomDialog = false }) {
-                                            Text("Cancel", color = Color.LightGray)
-                                        }
-                                        Button(
-                                            onClick = {
-                                                val qty = customValue.toDoubleOrNull() ?: 0.0
-                                                if (qty > 0) {
-                                                    viewModel.confirmChildLink(currentState.product.id, currentState.parentBarcode, currentState.childBarcode, qty)
-                                                    showCustomDialog = false
-                                                }
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = DeepPurple)
-                                        ) {
-                                            Text("Confirm")
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    ChildQuantityPrompt(
+                        product = currentState.product,
+                        onConfirm = { qty ->
+                            viewModel.confirmChildLink(currentState.product.id, currentState.parentBarcode, currentState.childBarcode, qty)
+                        },
+                        onCancel = { viewModel.resetState() }
+                    )
                 }
                 is ScannerViewModel.AppState.Error -> {
                     Text(text = currentState.error, color = ErrorRed, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
@@ -378,18 +315,6 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                 }
             }
         }
-    }
-}
-
-@Composable
-fun QuantityButton(label: String, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        modifier = Modifier.size(width = 120.dp, height = 80.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DeepPurple),
-        shape = RoundedCornerShape(12.dp)
-    ) {
-        Text(text = label, fontSize = 24.sp, fontWeight = FontWeight.Bold)
     }
 }
 
