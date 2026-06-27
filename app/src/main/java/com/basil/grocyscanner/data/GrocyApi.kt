@@ -29,6 +29,9 @@ interface GrocyApi {
     @POST("stock/products/{productId}/open")
     suspend fun openStock(@Path("productId") productId: Int, @Body request: OpenStockRequest)
 
+    @POST("stock/shoppinglist/add-product")
+    suspend fun addToShoppingList(@Body request: AddToShoppingListRequest)
+
     @GET("stock/products/{productId}/printlabel")
     suspend fun printLabel(@Path("productId") productId: Int)
 

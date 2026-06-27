@@ -85,6 +85,11 @@ data class OpenStockRequest(
     val amount: Int = 1
 )
 
+data class AddToShoppingListRequest(
+    val product_id: Int,
+    val amount: Int = 1
+)
+
 data class StockEntry(
     val id: Int,
     val amount: Double,
