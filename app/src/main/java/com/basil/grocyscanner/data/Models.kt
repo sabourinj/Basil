@@ -85,6 +85,21 @@ data class OpenStockRequest(
     val amount: Int = 1
 )
 
+data class ShoppingListItem(
+    val id: Int,
+    val product_id: Int? = null,
+    val amount: Double,
+    val note: String? = null,
+    val product_name: String? = null,
+    val product_picture_file_name: String? = null,
+    val done: Int = 0
+)
+
+data class AddToShoppingListRequest(
+    val product_id: Int,
+    val amount: Int = 1
+)
+
 data class StockEntry(
     val id: Int,
     val amount: Double,

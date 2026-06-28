@@ -36,6 +36,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             val showOff: Boolean = false,
             val showGrocy: Boolean = false
         ) : AppState()
+        data class ShoppingList(val items: List<ShoppingListItem>) : AppState()
         data class NeedsDate(
             val product: ProductDetails,
             val estimatedPrice: Double? = null,
@@ -52,6 +53,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             val addedAmount: Double = 1.0,
             val isPrinting: Boolean = false,
             val isOpened: Boolean = false,
+            val isAddingToList: Boolean = false,
             val lastScannedBarcode: String? = null,
             val lastPrice: Double? = null,
             val lastExpireDate: String? = null
@@ -61,6 +63,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             val product: ProductDetails,
             val entries: List<StockEntry>,
             val isOpened: Boolean = false,
+            val isAddingToList: Boolean = false,
             val canOpen: Boolean = false
         ) : AppState()
         data class LinkingChild(val product: ProductDetails, val parentBarcode: String) : AppState()
@@ -117,6 +120,47 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         batchMoveLocationName = locationName
         _currentMode.value = AppMode.BATCH_MOVE
         _state.value = AppState.BatchMoveActive(locationName)
+    }
+
+    fun showShoppingList() {
+        viewModelScope.launch {
+            _state.value = AppState.Loading("Fetching shopping list...", showGrocy = true)
+            fetchShoppingList()
+        }
+    }
+
+    private suspend fun fetchShoppingList() {
+        try {
+            val items = api.getShoppingList()
+            val allProducts = api.getProducts()
+            
+            val enrichedItems = items.map { item ->
+                val product = allProducts.find { it.id == item.product_id }
+                item.copy(
+                    product_name = product?.name ?: item.product_name,
+                    product_picture_file_name = product?.picture_file_name ?: item.product_picture_file_name
+                )
+            }
+
+            _state.value = AppState.ShoppingList(enrichedItems)
+        } catch (e: Exception) {
+            Log.e("BasilDebug", "Failed to fetch shopping list", e)
+            _state.value = AppState.Error("Failed to fetch shopping list")
+        }
+    }
+
+    fun markItemAsDone(item: ShoppingListItem) {
+        viewModelScope.launch {
+            try {
+                // If already done, maybe we want to undo? But user just said mark as done.
+                // Let's toggle it or just set to 1.
+                val newDone = if (item.done == 1) 0 else 1
+                api.updateShoppingListItem(item.id, mapOf("done" to newDone))
+                fetchShoppingList() // Refresh
+            } catch (e: Exception) {
+                Log.e("BasilDebug", "Failed to update item", e)
+            }
+        }
     }
 
     fun onBarcodeScanned(barcode: String) {
@@ -487,6 +531,15 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         viewModelScope.launch {
             try {
                 when(action) {
+                    "shopping_list" -> {
+                        val currentState = _state.value
+                        if (currentState is AppState.Success) {
+                            _state.value = currentState.copy(isAddingToList = true)
+                        } else if (currentState is AppState.InventoryResult) {
+                            _state.value = currentState.copy(isAddingToList = true)
+                        }
+                        api.addToShoppingList(AddToShoppingListRequest(product_id = productId, amount = 1))
+                    }
                     "open" -> {
                         api.openStock(productId, OpenStockRequest(1))
                         val currentState = _state.value
