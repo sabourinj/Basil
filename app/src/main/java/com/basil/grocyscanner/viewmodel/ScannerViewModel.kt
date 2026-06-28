@@ -52,6 +52,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             val addedAmount: Double = 1.0,
             val isPrinting: Boolean = false,
             val isOpened: Boolean = false,
+            val isAddingToList: Boolean = false,
             val lastScannedBarcode: String? = null,
             val lastPrice: Double? = null,
             val lastExpireDate: String? = null
@@ -61,6 +62,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             val product: ProductDetails,
             val entries: List<StockEntry>,
             val isOpened: Boolean = false,
+            val isAddingToList: Boolean = false,
             val canOpen: Boolean = false
         ) : AppState()
         data class LinkingChild(val product: ProductDetails, val parentBarcode: String) : AppState()
@@ -217,16 +219,16 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             Log.e("BasilDebug", "Batch Move HTTP Error ${e.code()}: $errorBody")
 
             if (e.code() == 400) {
-                _state.value = AppState.Error("Product not found.")
+                _state.value = AppState.Error("Product not found in Grocy.")
             } else if (e.code() == 405) {
                 val detail = if (currentProduct?.is_parent == 1) " (Parent Product)" else ""
-                _state.value = AppState.Error("Move not allowed$detail. Check Grocy product settings.")
+                _state.value = AppState.Error("Move not allowed$detail. Check settings.")
             } else {
                 _state.value = AppState.Error("Move failed: HTTP ${e.code()}")
             }
         } catch (e: Exception) {
             Log.e("BasilDebug", "Batch Move failed", e)
-            _state.value = AppState.Error("Move failed: ${e.message}")
+            _state.value = AppState.Error("Connection Error: Check your network.")
         }
     }
 
@@ -250,15 +252,21 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             barcodeId = response.barcode?.id ?: bDetails?.id
         } catch (e: HttpException) {
             if (_currentMode.value == AppMode.INVENTORY || _currentMode.value == AppMode.CONSUME) {
-                _state.value = AppState.Error("Product not found.")
+                _state.value = AppState.Error("Product not found in Grocy.")
                 return
             }
 
-            _state.value = AppState.Loading("Looking up product...", showOff = true)
+            _state.value = AppState.Loading("Looking up externally...", showOff = true)
+            var externalLookupError: String? = null
             try {
                 api.externalBarcodeLookup(barcode, true)
-            } catch (_: Exception) {
-                Log.w("BasilDebug", "External lookup timeout/error.")
+            } catch (ex: Exception) {
+                Log.w("BasilDebug", "External lookup failed: ${ex.message}")
+                if (ex is java.io.IOException) {
+                    externalLookupError = "Network error during external lookup."
+                } else if (ex is HttpException) {
+                    externalLookupError = "OpenFoodFacts lookup failed (HTTP ${ex.code()})."
+                }
             }
 
             try {
@@ -271,17 +279,18 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 isNewlyAdded = true
             } catch (e: HttpException) {
                 if (e.code() == 400) {
-                    _state.value = AppState.Error("Product not found.")
+                    val detail = if (externalLookupError != null) "\n($externalLookupError)" else ""
+                    _state.value = AppState.Error("Barcode not recognized.$detail")
                 } else {
                     _state.value = AppState.Error("HTTP ${e.code()}: Unable to identify product.")
                 }
                 return
-            } catch (_: Exception) {
-                _state.value = AppState.Error("Unable to identify product.\nAdd manually in Grocy.")
+            } catch (e: Exception) {
+                _state.value = AppState.Error("Connection error: ${e.message}")
                 return
             }
         } catch (e: Exception) {
-            _state.value = AppState.Error("Network Error: ${e.message}")
+            _state.value = AppState.Error("Connection Error: Check your network.")
             return
         }
 
@@ -470,12 +479,12 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
 
             } catch (e: HttpException) {
                 if (_currentMode.value == AppMode.CONSUME && e.code() == 400) {
-                    _state.value = AppState.Error("No stock found!")
+                    _state.value = AppState.Error("No stock found to consume!")
                 } else {
-                    _state.value = AppState.Error("Action failed: HTTP ${e.code()}")
+                    _state.value = AppState.Error("HTTP ${e.code()}: Action failed")
                 }
             } catch (e: Exception) {
-                _state.value = AppState.Error("Action failed: ${e.message}")
+                _state.value = AppState.Error("Connection Error: Action failed")
             } finally {
                 isProcessingAction = false
             }
@@ -487,6 +496,15 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         viewModelScope.launch {
             try {
                 when(action) {
+                    "shopping_list" -> {
+                        val currentState = _state.value
+                        if (currentState is AppState.Success) {
+                            _state.value = currentState.copy(isAddingToList = true)
+                        } else if (currentState is AppState.InventoryResult) {
+                            _state.value = currentState.copy(isAddingToList = true)
+                        }
+                        api.addToShoppingList(AddToShoppingListRequest(product_id = productId, amount = 1))
+                    }
                     "open" -> {
                         api.openStock(productId, OpenStockRequest(1))
                         val currentState = _state.value
@@ -509,11 +527,6 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                                 }
                                 .sortedBy { it.best_before_date }
                             _state.value = currentState.copy(entries = groupedEntries, isOpened = true, canOpen = canOpen)
-                            delay(1000)
-                            val finalState = _state.value
-                            if (finalState is AppState.InventoryResult) {
-                                _state.value = finalState.copy(isOpened = false)
-                            }
                         }
                     }
                     "print" -> {
@@ -539,7 +552,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                     }
                 }
             } catch (e: Exception) {
-                _state.value = AppState.Error("Quick action failed: ${e.message}")
+                _state.value = AppState.Error("Connection Error: Quick action failed")
             }
         }
     }
@@ -593,7 +606,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
 
             } catch (e: Exception) {
                 Log.e("BasilDebug", "Linking failed", e)
-                _state.value = AppState.Error("Linking failed: ${e.message}")
+                _state.value = AppState.Error("Connection Error: Linking failed")
             }
         }
     }
