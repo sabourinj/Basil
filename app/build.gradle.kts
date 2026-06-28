@@ -4,6 +4,10 @@ plugins {
     alias(libs.plugins.aboutlibraries)
 }
 
+aboutLibraries {
+    registerAndroidTasks = true
+}
+
 base {
     archivesName.set("basil")
 }

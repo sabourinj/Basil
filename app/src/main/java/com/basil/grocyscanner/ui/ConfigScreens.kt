@@ -54,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -69,7 +70,9 @@ import com.basil.grocyscanner.ui.theme.DeepPurple
 import com.basil.grocyscanner.ui.theme.ErrorRed
 import com.basil.grocyscanner.ui.theme.SuccessGreen
 import com.basil.grocyscanner.viewmodel.ScannerViewModel
+import com.mikepenz.aboutlibraries.Libs
 import com.mikepenz.aboutlibraries.ui.compose.m3.LibrariesContainer
+import com.mikepenz.aboutlibraries.util.withContext
 
 @Composable
 fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
@@ -319,18 +322,57 @@ fun SettingsScreen(
                         }
                     }
 
-                    MaterialTheme(
-                        colorScheme = MaterialTheme.colorScheme,
-                        typography = MaterialTheme.typography.copy(
-                            titleLarge = MaterialTheme.typography.titleLarge.copy(fontSize = 16.sp), // Library Names
-                            bodyMedium = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp), // Library Descriptions
-                            bodySmall = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),   // Version Numbers
-                            labelLarge = MaterialTheme.typography.labelLarge.copy(fontSize = 10.sp)  // License Badges
-                        )
-                    ) {
-                        LibrariesContainer(
-                            modifier = Modifier.fillMaxSize()
-                        )
+                    val context = LocalContext.current
+                    val libs = remember(context) {
+                        try {
+                            Libs.Builder().withContext(context).build()
+                        } catch (_: Exception) {
+                            null
+                        }
+                    }
+
+                    if (libs != null && (libs.libraries.isNotEmpty() || libs.licenses.isNotEmpty())) {
+                        MaterialTheme(
+                            colorScheme = MaterialTheme.colorScheme,
+                            typography = MaterialTheme.typography.copy(
+                                titleLarge = MaterialTheme.typography.titleLarge.copy(fontSize = 16.sp), // Library Names
+                                bodyMedium = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp), // Library Descriptions
+                                bodySmall = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),   // Version Numbers
+                                labelLarge = MaterialTheme.typography.labelLarge.copy(fontSize = 10.sp)  // License Badges
+                            )
+                        ) {
+                            LibrariesContainer(
+                                libraries = libs,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()),
+                            horizontalAlignment = Alignment.Start
+                        ) {
+                            Text("Open Source Libraries", style = MaterialTheme.typography.titleMedium, color = Color.Black, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            val manualLibs = listOf(
+                                "Jetpack Compose" to "Apache 2.0",
+                                "Material Design 3" to "Apache 2.0",
+                                "Retrofit" to "Apache 2.0",
+                                "OkHttp" to "Apache 2.0",
+                                "Coil" to "Apache 2.0",
+                                "Google Gemini AI" to "Apache 2.0",
+                                "AboutLibraries" to "Apache 2.0",
+                                "Kotlin Coroutines" to "Apache 2.0",
+                                "Gson" to "Apache 2.0"
+                            )
+
+                            manualLibs.forEach { (name, license) ->
+                                Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                                    Text(name, fontWeight = FontWeight.Bold, color = Color.Black, fontSize = 14.sp)
+                                    Text(license, style = MaterialTheme.typography.bodySmall, color = Color.DarkGray)
+                                }
+                            }
+                        }
                     }
                 }
             }

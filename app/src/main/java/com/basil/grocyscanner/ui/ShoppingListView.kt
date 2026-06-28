@@ -3,6 +3,7 @@ package com.basil.grocyscanner.ui
 import android.util.Base64
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -26,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -103,9 +106,10 @@ fun ShoppingListView(items: List<ShoppingListItem>, onToggleDone: (ShoppingListI
                                             .crossfade(true)
                                             .build(),
                                         contentDescription = null,
+                                        contentScale = ContentScale.Crop,
                                         modifier = Modifier
-                                            .size(48.dp)
-                                            .clip(RoundedCornerShape(4.dp))
+                                            .size(56.dp)
+                                            .clip(RoundedCornerShape(8.dp))
                                             .then(if (isDone) Modifier.alpha(0.5f) else Modifier)
                                     )
                                     Spacer(modifier = Modifier.width(12.dp))
@@ -134,12 +138,20 @@ fun ShoppingListView(items: List<ShoppingListItem>, onToggleDone: (ShoppingListI
                                     }
                                 }
 
-                                Text(
-                                    text = if (item.amount % 1.0 == 0.0) item.amount.toInt().toString() else item.amount.toString(),
-                                    color = if (isDone) Color.Gray else Color.White,
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Surface(
+                                    modifier = Modifier.size(40.dp),
+                                    shape = CircleShape,
+                                    color = if (isDone) Color.Gray.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.1f),
+                                    contentColor = if (isDone) Color.Gray else Color.White
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = if ((item.amount % 1.0) == 0.0) item.amount.toInt().toString() else item.amount.toString(),
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
