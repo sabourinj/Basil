@@ -36,6 +36,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             val showOff: Boolean = false,
             val showGrocy: Boolean = false
         ) : AppState()
+        data class ShoppingList(val items: List<ShoppingListItem>) : AppState()
         data class NeedsDate(
             val product: ProductDetails,
             val estimatedPrice: Double? = null,
@@ -119,6 +120,58 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         batchMoveLocationName = locationName
         _currentMode.value = AppMode.BATCH_MOVE
         _state.value = AppState.BatchMoveActive(locationName)
+    }
+
+    fun showShoppingList() {
+        viewModelScope.launch {
+            _state.value = AppState.Loading("Fetching shopping list...", showGrocy = true)
+            fetchShoppingList()
+        }
+    }
+
+    private suspend fun fetchShoppingList() {
+        try {
+            val items = api.getShoppingList()
+            val allProducts = api.getProducts()
+            
+            val enrichedItems = items.map { item ->
+                val product = allProducts.find { it.id == item.product_id }
+                val group = cachedGroups.find { it.id == product?.product_group_id }
+                
+                item.copy(
+                    product_name = product?.name ?: item.product_name,
+                    product_picture_file_name = product?.picture_file_name ?: item.product_picture_file_name,
+                    category_name = group?.name ?: "Uncategorized"
+                )
+            }.sortedWith(compareBy({ it.category_name }, { 
+                val d = it.done
+                if (d is Boolean) if (d) 1 else 0
+                else if (d is String) d.toIntOrNull() ?: 0
+                else (d as? Number)?.toInt() ?: 0
+            }, { it.product_name ?: it.note }))
+
+            _state.value = AppState.ShoppingList(enrichedItems)
+        } catch (e: Exception) {
+            Log.e("BasilDebug", "Failed to fetch shopping list", e)
+            _state.value = AppState.Error("Failed to fetch shopping list")
+        }
+    }
+
+    fun markItemAsDone(item: ShoppingListItem) {
+        viewModelScope.launch {
+            try {
+                val currentDone = item.done
+                val isDone = if (currentDone is Boolean) currentDone 
+                             else if (currentDone is String) currentDone == "1"
+                             else (currentDone as? Number)?.toInt() == 1
+                
+                val newDone = if (isDone) 0 else 1
+                api.updateShoppingListItem(item.id, mapOf("done" to newDone))
+                fetchShoppingList() // Refresh
+            } catch (e: Exception) {
+                Log.e("BasilDebug", "Failed to update item", e)
+            }
+        }
     }
 
     fun onBarcodeScanned(barcode: String) {

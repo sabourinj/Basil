@@ -1,6 +1,7 @@
 package com.basil.grocyscanner.data
 
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.PUT
@@ -31,6 +32,21 @@ interface GrocyApi {
 
     @POST("stock/shoppinglist/add-product")
     suspend fun addToShoppingList(@Body request: AddToShoppingListRequest)
+
+    @GET("objects/shopping_list")
+    suspend fun getShoppingList(): List<ShoppingListItem>
+
+    @DELETE("objects/shopping_list/{id}")
+    suspend fun deleteShoppingListItem(@Path("id") id: Int)
+
+    @PUT("objects/shopping_list/{id}")
+    suspend fun updateShoppingListItem(@Path("id") id: Int, @Body data: @JvmSuppressWildcards Map<String, Any>)
+
+    @GET("objects/products")
+    suspend fun getProducts(): List<ProductDetails>
+
+    @GET("objects/shopping_locations")
+    suspend fun getShoppingLocations(): List<ShoppingLocation>
 
     @GET("stock/products/{productId}/printlabel")
     suspend fun printLabel(@Path("productId") productId: Int)

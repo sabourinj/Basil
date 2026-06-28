@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.AddShoppingCart
 import androidx.compose.material.icons.filled.MoveDown
 import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.TakeoutDining
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -140,6 +141,13 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                     }
                 },
                 actions = {
+                    IconButton(onClick = { viewModel.showShoppingList() }) { 
+                        Icon(
+                            imageVector = Icons.Filled.ShoppingCart, 
+                            contentDescription = "Shopping List", 
+                            tint = if (state is ScannerViewModel.AppState.ShoppingList) SuccessGreen else Color.White
+                        ) 
+                    }
                     IconButton(onClick = onNavigateToSettings) { Icon(imageVector = Icons.Filled.Settings, contentDescription = "Settings", tint = Color.White) }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkerHeaderPurple, titleContentColor = Color.White)
@@ -164,16 +172,17 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                         }
                     }
                 } else {
+                    val isShoppingList = state is ScannerViewModel.AppState.ShoppingList
                     Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ModeButton("Purchase", currentMode == AppMode.PURCHASE) {
+                        ModeButton("Purchase", currentMode == AppMode.PURCHASE && !isShoppingList) {
                             if (currentMode != AppMode.PURCHASE) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             viewModel.setMode(AppMode.PURCHASE)
                         }
-                        ModeButton("Consume", currentMode == AppMode.CONSUME) {
+                        ModeButton("Consume", currentMode == AppMode.CONSUME && !isShoppingList) {
                             if (currentMode != AppMode.CONSUME) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             viewModel.setMode(AppMode.CONSUME)
                         }
-                        ModeButton("Inventory", currentMode == AppMode.INVENTORY) {
+                        ModeButton("Inventory", currentMode == AppMode.INVENTORY && !isShoppingList) {
                             if (currentMode != AppMode.INVENTORY) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             viewModel.setMode(AppMode.INVENTORY)
                         }
@@ -186,7 +195,7 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
         Column(
             modifier = Modifier.padding(paddingValues).padding(16.dp).fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = if (state is ScannerViewModel.AppState.ShoppingList) Arrangement.Top else Arrangement.Center
         ) {
             when (val currentState = state) {
                 is ScannerViewModel.AppState.Idle -> {
@@ -296,6 +305,9 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                 }
                 is ScannerViewModel.AppState.InventoryResult -> {
                     InventoryResultView(currentState = currentState, viewModel = viewModel)
+                }
+                is ScannerViewModel.AppState.ShoppingList -> {
+                    ShoppingListView(items = currentState.items, onToggleDone = { item -> viewModel.markItemAsDone(item) })
                 }
                 is ScannerViewModel.AppState.LinkingChild -> {
                     Text("Linking to: ${currentState.product.name}", style = MaterialTheme.typography.headlineSmall, color = Color.White, textAlign = TextAlign.Center)
