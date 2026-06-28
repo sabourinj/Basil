@@ -12,6 +12,7 @@ data class ProductDetails(
     val name: String,
     val description: String? = null,
     val location_id: Int? = null,
+    val shopping_location_id: Int? = null,
     val product_group_id: Int? = null,
     val default_best_before_days: Int = 0,
     val default_price: Double? = null,
@@ -92,7 +93,14 @@ data class ShoppingListItem(
     val note: String? = null,
     val product_name: String? = null,
     val product_picture_file_name: String? = null,
-    val done: Int = 0
+    val done: Any? = 0,
+    val shopping_location_id: Int? = null,
+    val category_name: String? = null
+)
+
+data class ShoppingLocation(
+    val id: Int,
+    val name: String
 )
 
 data class AddToShoppingListRequest(

@@ -136,11 +136,19 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             
             val enrichedItems = items.map { item ->
                 val product = allProducts.find { it.id == item.product_id }
+                val group = cachedGroups.find { it.id == product?.product_group_id }
+                
                 item.copy(
                     product_name = product?.name ?: item.product_name,
-                    product_picture_file_name = product?.picture_file_name ?: item.product_picture_file_name
+                    product_picture_file_name = product?.picture_file_name ?: item.product_picture_file_name,
+                    category_name = group?.name ?: "Uncategorized"
                 )
-            }
+            }.sortedWith(compareBy({ it.category_name }, { 
+                val d = it.done
+                if (d is Boolean) if (d) 1 else 0
+                else if (d is String) d.toIntOrNull() ?: 0
+                else (d as? Number)?.toInt() ?: 0
+            }, { it.product_name ?: it.note }))
 
             _state.value = AppState.ShoppingList(enrichedItems)
         } catch (e: Exception) {
@@ -152,9 +160,12 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
     fun markItemAsDone(item: ShoppingListItem) {
         viewModelScope.launch {
             try {
-                // If already done, maybe we want to undo? But user just said mark as done.
-                // Let's toggle it or just set to 1.
-                val newDone = if (item.done == 1) 0 else 1
+                val currentDone = item.done
+                val isDone = if (currentDone is Boolean) currentDone 
+                             else if (currentDone is String) currentDone == "1"
+                             else (currentDone as? Number)?.toInt() == 1
+                
+                val newDone = if (isDone) 0 else 1
                 api.updateShoppingListItem(item.id, mapOf("done" to newDone))
                 fetchShoppingList() // Refresh
             } catch (e: Exception) {

@@ -40,10 +40,13 @@ interface GrocyApi {
     suspend fun deleteShoppingListItem(@Path("id") id: Int)
 
     @PUT("objects/shopping_list/{id}")
-    suspend fun updateShoppingListItem(@Path("id") id: Int, @Body data: Map<String, Any>)
+    suspend fun updateShoppingListItem(@Path("id") id: Int, @Body data: @JvmSuppressWildcards Map<String, Any>)
 
     @GET("objects/products")
     suspend fun getProducts(): List<ProductDetails>
+
+    @GET("objects/shopping_locations")
+    suspend fun getShoppingLocations(): List<ShoppingLocation>
 
     @GET("stock/products/{productId}/printlabel")
     suspend fun printLabel(@Path("productId") productId: Int)
