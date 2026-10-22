@@ -119,9 +119,13 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                     vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
                 }
             }
-            is ScannerViewModel.AppState.Error, is ScannerViewModel.AppState.LinkingChild -> {
-                val pattern = longArrayOf(0, 150, 100, 150)
-                vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+            is ScannerViewModel.AppState.ShoppingList -> {
+                if (currentState.scanErrorTrigger > 0) {
+                    val pattern = longArrayOf(0, 250, 200, 250, 200, 250, 200, 250, 200, 250)
+                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                } else {
+                    vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+                }
             }
             else -> {}
         }
@@ -322,7 +326,11 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                     InventoryResultView(currentState = currentState, viewModel = viewModel)
                 }
                 is ScannerViewModel.AppState.ShoppingList -> {
-                    ShoppingListView(items = currentState.items, onToggleDone = { item -> viewModel.markItemAsDone(item) })
+                    ShoppingListView(
+                        items = currentState.items,
+                        newlyAddedProductId = currentState.newlyAddedProductId,
+                        onToggleDone = { item -> viewModel.markItemAsDone(item) }
+                    )
                 }
                 is ScannerViewModel.AppState.LinkingChild -> {
                     Text("Linking to: ${currentState.product.name}", style = MaterialTheme.typography.headlineSmall, color = Color.White, textAlign = TextAlign.Center)

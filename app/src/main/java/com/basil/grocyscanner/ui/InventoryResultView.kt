@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddShoppingCart
+import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.TakeoutDining
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -121,47 +122,66 @@ fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.Inve
                     .build(),
                 contentDescription = "Product Image",
                 modifier = Modifier
-                    .size(120.dp)
+                    .size(110.dp)
                     .clip(RoundedCornerShape(12.dp))
             )
-            Spacer(modifier = Modifier.width(32.dp))
+            Spacer(modifier = Modifier.width(20.dp))
         }
 
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            FilledIconButton(
-                onClick = { viewModel.performQuickAction(currentState.product.id, "open") },
-                enabled = currentState.canOpen,
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = if (currentState.isOpened) Color.White.copy(alpha = blinkAlpha) else Color.White,
-                    contentColor = DeepPurple,
-                    disabledContainerColor = Color.White.copy(alpha = 0.2f),
-                    disabledContentColor = DeepPurple.copy(alpha = 0.5f)
-                ),
-                modifier = Modifier.size(56.dp)
-            ) {
-                Icon(imageVector = Icons.Filled.TakeoutDining, contentDescription = "Open Next", modifier = Modifier.size(28.dp))
+        // 2x2 Grid of action buttons (full 56.dp industrial size)
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                FilledIconButton(
+                    onClick = { viewModel.performQuickAction(currentState.product.id, "print") },
+                    enabled = currentState.canPrint,
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = if (currentState.isPrinting) Color.White.copy(alpha = blinkAlpha) else Color.White,
+                        contentColor = DeepPurple,
+                        disabledContainerColor = Color.White.copy(alpha = 0.2f),
+                        disabledContentColor = DeepPurple.copy(alpha = 0.5f)
+                    ),
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Icon(imageVector = Icons.Filled.Print, contentDescription = "Print Label", modifier = Modifier.size(28.dp))
+                }
+
+                FilledIconButton(
+                    onClick = { viewModel.performQuickAction(currentState.product.id, "open") },
+                    enabled = currentState.canOpen,
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = if (currentState.isOpened) Color.White.copy(alpha = blinkAlpha) else Color.White,
+                        contentColor = DeepPurple,
+                        disabledContainerColor = Color.White.copy(alpha = 0.2f),
+                        disabledContentColor = DeepPurple.copy(alpha = 0.5f)
+                    ),
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Icon(imageVector = Icons.Filled.TakeoutDining, contentDescription = "Open Next", modifier = Modifier.size(28.dp))
+                }
             }
 
-            FilledIconButton(
-                onClick = { viewModel.performQuickAction(currentState.product.id, "shopping_list") },
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = if (currentState.isAddingToList) Color.White.copy(alpha = blinkAlpha) else Color.White,
-                    contentColor = DeepPurple
-                ),
-                modifier = Modifier.size(56.dp)
-            ) {
-                Icon(imageVector = Icons.Filled.AddShoppingCart, contentDescription = "Add to List", modifier = Modifier.size(28.dp))
-            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                FilledIconButton(
+                    onClick = { viewModel.performQuickAction(currentState.product.id, "shopping_list") },
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = if (currentState.isAddingToList) Color.White.copy(alpha = blinkAlpha) else Color.White,
+                        contentColor = DeepPurple
+                    ),
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Icon(imageVector = Icons.Filled.AddShoppingCart, contentDescription = "Add to List", modifier = Modifier.size(28.dp))
+                }
 
-            FilledIconButton(
-                onClick = { showGrocycodeDialog = true },
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = Color.White,
-                    contentColor = DeepPurple
-                ),
-                modifier = Modifier.size(56.dp)
-            ) {
-                Icon(imageVector = Icons.Filled.QrCode, contentDescription = "Show Grocycode", modifier = Modifier.size(28.dp))
+                FilledIconButton(
+                    onClick = { showGrocycodeDialog = true },
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = Color.White,
+                        contentColor = DeepPurple
+                    ),
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Icon(imageVector = Icons.Filled.QrCode, contentDescription = "Show Grocycode", modifier = Modifier.size(28.dp))
+                }
             }
         }
     }
