@@ -278,6 +278,21 @@ class MainActivity : ComponentActivity() {
             ))
         }
 
+        // 3. Do Not Buy for Products
+        val doNotBuyExists = existingFields.any {
+            it.name == "do_not_buy" && it.entity == "products"
+        }
+        if (!doNotBuyExists) {
+            Log.d("BasilDebug", "Injecting do_not_buy field...")
+            api.createUserfield(UserfieldCreateRequest(
+                name = "do_not_buy",
+                caption = "Do Not Buy",
+                type = "checkbox",
+                entity = "products",
+                config = null
+            ))
+        }
+
         Log.d("BasilDebug", "Grocy database schema check complete.")
     }
 }

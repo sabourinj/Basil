@@ -83,4 +83,7 @@ interface GrocyApi {
 
     @GET("userfields/product_barcodes/{barcodeId}")
     suspend fun getBarcodeUserfields(@Path("barcodeId") barcodeId: Int): Map<String, Any>
+
+    @GET("userfields/products/{productId}")
+    suspend fun getProductUserfields(@Path("productId") productId: Int): Map<String, Any>
 }

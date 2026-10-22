@@ -234,6 +234,21 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                         onCancel = { viewModel.resetState() }
                     )
                 }
+                is ScannerViewModel.AppState.DoNotBuyWarning -> {
+                    DoNotBuyWarningDialog(
+                        product = currentState.product,
+                        onConfirm = {
+                            viewModel.proceedAfterDoNotBuyWarning(
+                                product = currentState.product,
+                                estimatedPrice = currentState.estimatedPrice,
+                                amount = currentState.amount,
+                                autoPrint = currentState.autoPrint,
+                                scannedBarcode = currentState.scannedBarcode
+                            )
+                        },
+                        onCancel = { viewModel.resetState() }
+                    )
+                }
                 is ScannerViewModel.AppState.Success -> {
                     val infiniteTransition = rememberInfiniteTransition(label = "blink")
                     val blinkAlpha by infiniteTransition.animateFloat(
