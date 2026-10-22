@@ -23,6 +23,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -32,7 +34,14 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.LinearEasing
 import coil.compose.AsyncImage
+import kotlinx.coroutines.launch
 import coil.request.ImageRequest
 import com.basil.grocyscanner.data.SecurePrefs
 import com.basil.grocyscanner.data.ShoppingListItem
@@ -41,13 +50,31 @@ import com.basil.grocyscanner.ui.theme.DeepPurple
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ShoppingListView(items: List<ShoppingListItem>, onToggleDone: (ShoppingListItem) -> Unit) {
+fun ShoppingListView(
+    items: List<ShoppingListItem>,
+    newlyAddedProductId: Int? = null,
+    onToggleDone: (ShoppingListItem) -> Unit
+) {
     val context = LocalContext.current
     val sharedPrefs = SecurePrefs.get(context)
     val rawUrl = sharedPrefs.getString("API_URL", "") ?: ""
     val apiToken = sharedPrefs.getString("API_TOKEN", "") ?: ""
     var safeUrl = if (rawUrl.endsWith("/")) rawUrl else "$rawUrl/"
     if (!safeUrl.endsWith("api/")) safeUrl += "api/"
+
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
+
+    androidx.compose.runtime.LaunchedEffect(newlyAddedProductId) {
+        if (newlyAddedProductId != null) {
+            val index = items.indexOfFirst { it.product_id == newlyAddedProductId }
+            if (index >= 0) {
+                coroutineScope.launch {
+                    listState.animateScrollToItem(index, scrollOffset = 0)
+                }
+            }
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         if (items.isEmpty()) {
@@ -58,6 +85,7 @@ fun ShoppingListView(items: List<ShoppingListItem>, onToggleDone: (ShoppingListI
             }
 
             LazyColumn(
+                state = listState,
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -84,9 +112,32 @@ fun ShoppingListView(items: List<ShoppingListItem>, onToggleDone: (ShoppingListI
                             else if (d is String) d == "1"
                             else (d as? Number)?.toInt() == 1
                         }
+
+                        val isNewlyAdded = newlyAddedProductId != null && item.product_id == newlyAddedProductId
+                        val pulseProgress = if (isNewlyAdded) {
+                            val animState = remember { androidx.compose.animation.core.Animatable(0f) }
+                            androidx.compose.runtime.LaunchedEffect(newlyAddedProductId) {
+                                repeat(3) {
+                                    animState.animateTo(
+                                        targetValue = 1f,
+                                        animationSpec = androidx.compose.animation.core.tween(400, easing = androidx.compose.animation.core.LinearEasing)
+                                    )
+                                    animState.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = androidx.compose.animation.core.tween(400, easing = androidx.compose.animation.core.LinearEasing)
+                                    )
+                                }
+                                animState.snapTo(0f)
+                            }
+                            animState.value
+                        } else {
+                            0f
+                        }
+
                         Card(
                             colors = CardDefaults.cardColors(
-                                containerColor = if (isDone) Color.DarkGray.copy(alpha = 0.4f) else DarkerHeaderPurple
+                                containerColor = if (isDone) Color.DarkGray.copy(alpha = 0.4f) 
+                                                 else androidx.compose.ui.graphics.lerp(DarkerHeaderPurple, Color.White, pulseProgress)
                             ),
                             modifier = Modifier.fillMaxWidth(),
                             onClick = { onToggleDone(item) }

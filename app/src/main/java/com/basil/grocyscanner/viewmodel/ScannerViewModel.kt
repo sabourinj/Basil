@@ -36,7 +36,11 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             val showOff: Boolean = false,
             val showGrocy: Boolean = false
         ) : AppState()
-        data class ShoppingList(val items: List<ShoppingListItem>) : AppState()
+        data class ShoppingList(
+            val items: List<ShoppingListItem>,
+            val scanErrorTrigger: Long = 0L,
+            val newlyAddedProductId: Int? = null
+        ) : AppState()
         data class NeedsDate(
             val product: ProductDetails,
             val estimatedPrice: Double? = null,
@@ -63,8 +67,10 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             val product: ProductDetails,
             val entries: List<StockEntry>,
             val isOpened: Boolean = false,
+            val isPrinting: Boolean = false,
             val isAddingToList: Boolean = false,
-            val canOpen: Boolean = false
+            val canOpen: Boolean = false,
+            val canPrint: Boolean = false
         ) : AppState()
         data class LinkingChild(val product: ProductDetails, val parentBarcode: String) : AppState()
         data class ChildQuantityPrompt(val product: ProductDetails, val parentBarcode: String, val childBarcode: String) : AppState()
@@ -190,6 +196,38 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         val currentState = _state.value
         if (currentState is AppState.NeedsDate) {
             _state.value = currentState.copy(scanErrorTrigger = System.currentTimeMillis())
+            return
+        }
+        if (currentState is AppState.ShoppingList) {
+            viewModelScope.launch {
+                try {
+                    val response = api.getProductByBarcode(barcode)
+                    val product = response.product
+                    api.addToShoppingList(AddToShoppingListRequest(product_id = product.id, amount = 1))
+                    val items = api.getShoppingList()
+                    val allProducts = api.getProducts()
+                    
+                    val enrichedItems = items.map { item ->
+                        val p = allProducts.find { it.id == item.product_id }
+                        val group = cachedGroups.find { it.id == p?.product_group_id }
+                        
+                        item.copy(
+                            product_name = p?.name ?: item.product_name,
+                            product_picture_file_name = p?.picture_file_name ?: item.product_picture_file_name,
+                            category_name = group?.name ?: "Uncategorized"
+                        )
+                    }.sortedWith(compareBy({ it.category_name }, { 
+                        val d = it.done
+                        if (d is Boolean) if (d) 1 else 0
+                        else if (d is String) d.toIntOrNull() ?: 0
+                        else (d as? Number)?.toInt() ?: 0
+                    }, { it.product_name ?: it.note }))
+
+                    _state.value = AppState.ShoppingList(items = enrichedItems, newlyAddedProductId = product.id)
+                } catch (e: Exception) {
+                    _state.value = currentState.copy(scanErrorTrigger = System.currentTimeMillis())
+                }
+            }
             return
         }
         if (currentState is AppState.LinkingChild) {
@@ -432,6 +470,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                     _state.value = AppState.Loading("Checking inventory...", showGrocy = true)
                     val rawEntries = api.getStockEntries(product.id)
                     val canOpen = rawEntries.any { it.open == 0 }
+                    val canPrint = rawEntries.isNotEmpty()
                     val groupedEntries = rawEntries
                         .groupBy { if (it.best_before_date.isNullOrBlank()) "2999-12-31" else it.best_before_date }
                         .map { mapEntry ->
@@ -444,7 +483,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                             )
                         }
                         .sortedBy { it.best_before_date }
-                    _state.value = AppState.InventoryResult(product, groupedEntries, canOpen = canOpen)
+                    _state.value = AppState.InventoryResult(product, groupedEntries, canOpen = canOpen, canPrint = canPrint)
                 } catch (_: Exception) {
                     _state.value = AppState.Error("Failed to fetch stock entries.")
                 }
@@ -630,6 +669,11 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                         val successState = _state.value as? AppState.Success
                         if (successState != null) {
                             _state.value = successState.copy(isPrinting = true)
+                        } else {
+                            val inventoryState = _state.value as? AppState.InventoryResult
+                            if (inventoryState != null) {
+                                _state.value = inventoryState.copy(isPrinting = true)
+                            }
                         }
 
                         repeat(printCount) {
