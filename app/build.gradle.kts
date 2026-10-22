@@ -65,6 +65,7 @@ dependencies {
     implementation(libs.androidx.security.crypto)
     implementation(libs.coil.compose)
     implementation(libs.generativeai)
+    implementation(libs.zxing.core)
     implementation(libs.aboutlibraries.compose)
     implementation(libs.aboutlibraries.core)
 
