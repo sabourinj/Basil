@@ -1,12 +1,15 @@
 package com.basil.grocyscanner.ui
 
+import android.graphics.Bitmap
 import android.util.Base64
+import android.util.Log
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -27,6 +30,8 @@ import androidx.compose.material.icons.filled.TakeoutDining
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
@@ -34,15 +39,24 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.basil.grocyscanner.ui.theme.DarkerHeaderPurple
@@ -58,6 +72,7 @@ import java.util.Locale
 @Composable
 fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.InventoryResult, viewModel: ScannerViewModel) {
     val context = LocalContext.current
+    var showGrocycodeDialog by remember { mutableStateOf(false) }
 
     val infiniteTransition = rememberInfiniteTransition(label = "blink")
     val blinkAlpha by infiniteTransition.animateFloat(
@@ -137,6 +152,73 @@ fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.Inve
             ) {
                 Icon(imageVector = Icons.Filled.AddShoppingCart, contentDescription = "Add to List", modifier = Modifier.size(28.dp))
             }
+
+            FilledIconButton(
+                onClick = { showGrocycodeDialog = true },
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = Color.White,
+                    contentColor = DeepPurple
+                ),
+                modifier = Modifier.size(56.dp)
+            ) {
+                Icon(imageVector = Icons.Filled.QrCode, contentDescription = "Show Grocycode", modifier = Modifier.size(28.dp))
+            }
+        }
+    }
+
+    if (showGrocycodeDialog) {
+        Dialog(onDismissRequest = { showGrocycodeDialog = false }) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = DarkerHeaderPurple),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Grocycode",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    val grocycodeText = "grcy:p:${currentState.product.id}"
+                    val qrcodeBitmap: Bitmap? = remember(currentState.product.id) {
+                        generateQrCodeBitmap(grocycodeText, 400)
+                    }
+
+                    if (qrcodeBitmap != null) {
+                        Image(
+                            bitmap = qrcodeBitmap.asImageBitmap(),
+                            contentDescription = "Grocycode QR Code",
+                            modifier = Modifier
+                                .size(200.dp)
+                                .clip(RoundedCornerShape(8.dp)),
+                            filterQuality = FilterQuality.None
+                        )
+                    } else {
+                        Text("Failed to generate QR Code", color = ErrorRed)
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Button(
+                        onClick = { showGrocycodeDialog = false },
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = Color.White,
+                            contentColor = DeepPurple
+                        )
+                    ) {
+                        Text("Close", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
     }
 
@@ -197,5 +279,25 @@ fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.Inve
                 }
             }
         }
+    }
+}
+
+private fun generateQrCodeBitmap(contents: String, size: Int = 400): Bitmap? {
+    try {
+        val writer = QRCodeWriter()
+        val hints = mapOf(EncodeHintType.MARGIN to 1)
+        val bitMatrix = writer.encode(contents, BarcodeFormat.QR_CODE, size, size, hints)
+        val width = bitMatrix.width
+        val height = bitMatrix.height
+        val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
+        for (x in 0 until width) {
+            for (y in 0 until height) {
+                bmp.setPixel(x, y, if (bitMatrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+            }
+        }
+        return bmp
+    } catch (e: Exception) {
+        e.printStackTrace()
+        return null
     }
 }
