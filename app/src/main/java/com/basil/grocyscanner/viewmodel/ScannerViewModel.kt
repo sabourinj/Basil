@@ -69,6 +69,13 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         data class LinkingChild(val product: ProductDetails, val parentBarcode: String) : AppState()
         data class ChildQuantityPrompt(val product: ProductDetails, val parentBarcode: String, val childBarcode: String) : AppState()
         data class BatchMoveActive(val locationName: String) : AppState()
+        data class DoNotBuyWarning(
+            val product: ProductDetails,
+            val estimatedPrice: Double?,
+            val amount: Double,
+            val autoPrint: Boolean,
+            val scannedBarcode: String?
+        ) : AppState()
     }
 
     private val _state = MutableStateFlow<AppState>(AppState.Idle)
@@ -444,26 +451,31 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             }
             AppMode.CONSUME -> confirmAction(product.id, amount, null, null)
             AppMode.PURCHASE -> {
-                var estimatedPrice: Double? = knownPrice
-
-                if (estimatedPrice == null || estimatedPrice <= 0.0) {
-                    if (generativeModel != null) {
-                        _state.value = AppState.Loading("Estimating price...", showGemini = true)
-                        try {
-                            val pricePrompt = "Estimate the current USD price of '${product.name}'. Return a JSON object with a single key 'price' containing a float value."
-                            val response = generativeModel?.generateContent(pricePrompt)
-                            response?.text?.let { jsonStr ->
-                                estimatedPrice = JSONObject(jsonStr).optDouble("price", 0.0).takeIf { it > 0.0 }
-                            }
-                        } catch (e: Exception) {
-                            Log.e("BasilDebug", "Price estimation failed: ${e.message}")
+                try {
+                    val productUf = api.getProductUserfields(product.id)
+                    val doNotBuy = productUf["do_not_buy"]?.let {
+                        it == true || it == 1 || it == "1" || it.toString().lowercase() == "true"
+                    } ?: false
+                    if (doNotBuy) {
+                        var autoPrint = false
+                        if (barcodeId != null) {
+                            try {
+                                val uf = api.getBarcodeUserfields(barcodeId)
+                                autoPrint = (uf["auto_print_label"]?.toString() ?: "0") == "1"
+                            } catch (_: Exception) {}
                         }
+                        _state.value = AppState.DoNotBuyWarning(
+                            product = product,
+                            estimatedPrice = knownPrice,
+                            amount = amount,
+                            autoPrint = autoPrint,
+                            scannedBarcode = scannedBarcode
+                        )
+                        return
                     }
+                } catch (e: Exception) {
+                    Log.e("BasilDebug", "Failed to check do_not_buy userfield: ${e.message}")
                 }
-
-                val productGroup = cachedGroups.find { it.id == product.product_group_id }
-                val strategy = productGroup?.userfields?.expiration_strategy ?: "ai_estimate"
-                val shelfLife = product.default_best_before_days
 
                 var autoPrint = false
                 if (barcodeId != null) {
@@ -473,23 +485,54 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                     } catch (_: Exception) {}
                 }
 
-                when (strategy) {
-                    "user_entry" -> {
-                        _state.value = AppState.NeedsDate(product, estimatedPrice, amount, autoPrint)
-                    }
-                    "ai_estimate" -> {
-                        val daysToAdd = shelfLife.toLong()
-                        val autoCalculatedDate = LocalDate.now().plusDays(daysToAdd).format(
-                            DateTimeFormatter.ISO_LOCAL_DATE)
-                        confirmAction(product.id, amount, autoCalculatedDate, estimatedPrice, autoPrint, scannedBarcode)
-                    }
-                    "not_required", "" -> {
-                        confirmAction(product.id, amount, null, estimatedPrice, autoPrint, scannedBarcode)
-                    }
-                }
+                continuePurchaseProcessing(product, knownPrice, amount, autoPrint, scannedBarcode)
             }
             AppMode.BATCH_MOVE -> {
                 // Handled directly in onBarcodeScanned/processBatchMove
+            }
+        }
+    }
+
+    fun proceedAfterDoNotBuyWarning(product: ProductDetails, estimatedPrice: Double?, amount: Double, autoPrint: Boolean, scannedBarcode: String?) {
+        viewModelScope.launch {
+            continuePurchaseProcessing(product, estimatedPrice, amount, autoPrint, scannedBarcode)
+        }
+    }
+
+    private suspend fun continuePurchaseProcessing(product: ProductDetails, knownPrice: Double? = null, amount: Double = 1.0, autoPrint: Boolean = false, scannedBarcode: String? = null) {
+        var estimatedPrice: Double? = knownPrice
+
+        if (estimatedPrice == null || estimatedPrice <= 0.0) {
+            if (generativeModel != null) {
+                _state.value = AppState.Loading("Estimating price...", showGemini = true)
+                try {
+                    val pricePrompt = "Estimate the current USD price of '${product.name}'. Return a JSON object with a single key 'price' containing a float value."
+                    val response = generativeModel?.generateContent(pricePrompt)
+                    response?.text?.let { jsonStr ->
+                        estimatedPrice = JSONObject(jsonStr).optDouble("price", 0.0).takeIf { it > 0.0 }
+                    }
+                } catch (e: Exception) {
+                    Log.e("BasilDebug", "Price estimation failed: ${e.message}")
+                }
+            }
+        }
+
+        val productGroup = cachedGroups.find { it.id == product.product_group_id }
+        val strategy = productGroup?.userfields?.expiration_strategy ?: "ai_estimate"
+        val shelfLife = product.default_best_before_days
+
+        when (strategy) {
+            "user_entry" -> {
+                _state.value = AppState.NeedsDate(product, estimatedPrice, amount, autoPrint)
+            }
+            "ai_estimate" -> {
+                val daysToAdd = shelfLife.toLong()
+                val autoCalculatedDate = LocalDate.now().plusDays(daysToAdd).format(
+                    DateTimeFormatter.ISO_LOCAL_DATE)
+                confirmAction(product.id, amount, autoCalculatedDate, estimatedPrice, autoPrint, scannedBarcode)
+            }
+            "not_required", "" -> {
+                confirmAction(product.id, amount, null, estimatedPrice, autoPrint, scannedBarcode)
             }
         }
     }
