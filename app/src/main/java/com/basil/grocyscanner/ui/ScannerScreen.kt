@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.AddLink
 import androidx.compose.material.icons.filled.AddShoppingCart
 import androidx.compose.material.icons.filled.MoveDown
@@ -310,6 +311,15 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                                     ),
                                     modifier = Modifier.size(64.dp)
                                 ) { Icon(imageVector = Icons.Filled.AddShoppingCart, contentDescription = "Add to Shopping List", modifier = Modifier.size(32.dp)) }
+
+                                FilledIconButton(
+                                    onClick = { viewModel.performQuickAction(prodId, "do_not_buy") },
+                                    colors = IconButtonDefaults.filledIconButtonColors(
+                                        containerColor = if (currentState.isDoNotBuySet) Color.White.copy(alpha = blinkAlpha) else Color.White,
+                                        contentColor = DeepPurple
+                                    ),
+                                    modifier = Modifier.size(64.dp)
+                                ) { Icon(imageVector = Icons.Filled.Block, contentDescription = "Mark Do Not Buy", modifier = Modifier.size(32.dp)) }
                             }
                         }
                     }
