@@ -4,7 +4,14 @@ data class ProductResponse(
     val product: ProductDetails,
     val last_price: Double? = null,
     val stock_amount: Double? = null,
+    val stock_amount_aggregated: Double? = null,
     val barcode: BarcodeDetails? = null
+)
+
+// Combined stock across a parent product and all of its children
+data class ParentStock(
+    val name: String,
+    val totalAmount: Double
 )
 
 data class ProductDetails(
@@ -18,7 +25,8 @@ data class ProductDetails(
     val default_price: Double? = null,
     val stock_amount: Double? = null,
     val picture_file_name: String? = null,
-    val is_parent: Int? = 0
+    val is_parent: Int? = 0,
+    val parent_product_id: Int? = null
 )
 
 data class BarcodeDetails(

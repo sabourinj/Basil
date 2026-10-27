@@ -60,7 +60,8 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             val isAddingToList: Boolean = false,
             val lastScannedBarcode: String? = null,
             val lastPrice: Double? = null,
-            val lastExpireDate: String? = null
+            val lastExpireDate: String? = null,
+            val parentStock: ParentStock? = null
         ) : AppState()
         data class Error(val error: String) : AppState()
         data class InventoryResult(
@@ -70,7 +71,8 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             val isPrinting: Boolean = false,
             val isAddingToList: Boolean = false,
             val canOpen: Boolean = false,
-            val canPrint: Boolean = false
+            val canPrint: Boolean = false,
+            val parentStock: ParentStock? = null
         ) : AppState()
         data class LinkingChild(val product: ProductDetails, val parentBarcode: String) : AppState()
         data class ChildQuantityPrompt(val product: ProductDetails, val parentBarcode: String, val childBarcode: String) : AppState()
@@ -422,6 +424,17 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         }
     }
 
+    private suspend fun fetchParentStock(product: ProductDetails?): ParentStock? {
+        val parentId = product?.parent_product_id ?: return null
+        return try {
+            val parent = api.getProductById(parentId)
+            ParentStock(parent.product.name, parent.stock_amount_aggregated ?: parent.stock_amount ?: 0.0)
+        } catch (e: Exception) {
+            Log.e("BasilDebug", "Failed to fetch parent stock: ${e.message}")
+            null
+        }
+    }
+
     private suspend fun enrichProductWithGemini(productId: Int, name: String) {
         try {
             val locationList = _locations.value.joinToString { "${it.id}: ${it.name}" }
@@ -483,7 +496,8 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                             )
                         }
                         .sortedBy { it.best_before_date }
-                    _state.value = AppState.InventoryResult(product, groupedEntries, canOpen = canOpen, canPrint = canPrint)
+                    val parentStock = fetchParentStock(product)
+                    _state.value = AppState.InventoryResult(product, groupedEntries, canOpen = canOpen, canPrint = canPrint, parentStock = parentStock)
                 } catch (_: Exception) {
                     _state.value = AppState.Error("Failed to fetch stock entries.")
                 }
@@ -595,6 +609,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 val updatedData = api.getProductById(productId)
                 val remaining = updatedData.stock_amount ?: 0.0
                 val stockStr = if (remaining % 1.0 == 0.0) remaining.toInt().toString() else remaining.toString()
+                val parentStock = fetchParentStock(updatedData.product)
 
                 _state.value = AppState.Success(
                     message = "Success!",
@@ -605,7 +620,8 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                     addedAmount = if (_currentMode.value == AppMode.PURCHASE) amount else 1.0,
                     lastScannedBarcode = scannedBarcode,
                     lastPrice = price,
-                    lastExpireDate = expireDate
+                    lastExpireDate = expireDate,
+                    parentStock = parentStock
                 )
                 
                 if (autoPrint && _currentMode.value == AppMode.PURCHASE) {

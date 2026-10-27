@@ -95,6 +95,11 @@ fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.Inve
         modifier = Modifier.padding(horizontal = 16.dp)
     )
 
+    currentState.parentStock?.let {
+        Spacer(modifier = Modifier.height(8.dp))
+        ParentStockBadge(it)
+    }
+
     Spacer(modifier = Modifier.height(24.dp))
 
     // Hero Row: Image and Actions side-by-side
