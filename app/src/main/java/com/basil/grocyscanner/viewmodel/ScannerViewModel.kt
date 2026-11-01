@@ -39,7 +39,8 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         data class ShoppingList(
             val items: List<ShoppingListItem>,
             val scanErrorTrigger: Long = 0L,
-            val newlyAddedProductId: Int? = null
+            val newlyAddedProductId: Int? = null,
+            val scanError: String? = null
         ) : AppState()
         data class NeedsDate(
             val product: ProductDetails,
@@ -61,7 +62,8 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             val isDoNotBuySet: Boolean = false,
             val lastScannedBarcode: String? = null,
             val lastPrice: Double? = null,
-            val lastExpireDate: String? = null
+            val lastExpireDate: String? = null,
+            val parentStock: ParentStock? = null
         ) : AppState()
         data class Error(val error: String) : AppState()
         data class InventoryResult(
@@ -71,7 +73,8 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             val isPrinting: Boolean = false,
             val isAddingToList: Boolean = false,
             val canOpen: Boolean = false,
-            val canPrint: Boolean = false
+            val canPrint: Boolean = false,
+            val parentStock: ParentStock? = null
         ) : AppState()
         data class LinkingChild(val product: ProductDetails, val parentBarcode: String) : AppState()
         data class ChildQuantityPrompt(val product: ProductDetails, val parentBarcode: String, val childBarcode: String) : AppState()
@@ -93,6 +96,20 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
 
     private var lastScanTime = 0L
     private var lastScannedBarcode = ""
+
+    companion object {
+        const val INVALID_SCAN_MESSAGE = "Not a product code"
+
+        // Scans matching any of these are rejected rather than sent to Grocy.
+        // Catches URL QR codes, e.g. the "SmartLabel" codes next to UPCs.
+        // Kept in step with basil-capture's DEFAULT_REJECT_PATTERNS.
+        private val REJECT_PATTERNS = listOf(
+            Regex("^[a-z][a-z0-9+.-]*://", RegexOption.IGNORE_CASE),
+            Regex("^www\\.", RegexOption.IGNORE_CASE)
+        )
+
+        fun isRejectedScan(barcode: String) = REJECT_PATTERNS.any { it.containsMatchIn(barcode) }
+    }
 
     private val generativeModel by lazy {
         geminiApiKey?.let {
@@ -200,6 +217,12 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             return
         }
         if (currentState is AppState.ShoppingList) {
+            if (isRejectedScan(barcode)) {
+                // e.g. a URL QR code. Never sent to Grocy; flagged in the list instead.
+                Log.d("BasilDebug", "Scan rejected: $barcode")
+                _state.value = currentState.copy(scanErrorTrigger = System.currentTimeMillis(), scanError = INVALID_SCAN_MESSAGE)
+                return
+            }
             viewModelScope.launch {
                 try {
                     val response = api.getProductByBarcode(barcode)
@@ -232,6 +255,11 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             return
         }
         if (currentState is AppState.LinkingChild) {
+            if (isRejectedScan(barcode)) {
+                Log.d("BasilDebug", "Scan rejected: $barcode")
+                _state.value = AppState.Error(INVALID_SCAN_MESSAGE)
+                return
+            }
             _state.value = AppState.ChildQuantityPrompt(currentState.product, currentState.parentBarcode, barcode)
             return
         }
@@ -244,6 +272,14 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
 
         lastScannedBarcode = barcode
         lastScanTime = currentTime
+
+        if (isRejectedScan(barcode)) {
+            // e.g. a URL QR code. Never sent to Grocy, but still shown as an
+            // error so the scan doesn't look like it went unnoticed.
+            Log.d("BasilDebug", "Scan rejected: $barcode")
+            _state.value = AppState.Error(INVALID_SCAN_MESSAGE)
+            return
+        }
 
         viewModelScope.launch {
             if (_currentMode.value == AppMode.BATCH_MOVE) {
@@ -423,6 +459,20 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         }
     }
 
+    // Returns null when the product has no parent or its siblings have no stock
+    private suspend fun fetchParentStock(product: ProductDetails?, ownAmount: Double): ParentStock? {
+        val parentId = product?.parent_product_id ?: return null
+        return try {
+            val parent = api.getProductById(parentId)
+            val familyTotal = parent.stock_amount_aggregated ?: parent.stock_amount ?: 0.0
+            val others = familyTotal - ownAmount
+            if (others > 0.0) ParentStock(parent.product.name, others) else null
+        } catch (e: Exception) {
+            Log.e("BasilDebug", "Failed to fetch parent stock: ${e.message}")
+            null
+        }
+    }
+
     private suspend fun enrichProductWithGemini(productId: Int, name: String) {
         try {
             val locationList = _locations.value.joinToString { "${it.id}: ${it.name}" }
@@ -484,7 +534,8 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                             )
                         }
                         .sortedBy { it.best_before_date }
-                    _state.value = AppState.InventoryResult(product, groupedEntries, canOpen = canOpen, canPrint = canPrint)
+                    val parentStock = fetchParentStock(product, rawEntries.sumOf { it.amount })
+                    _state.value = AppState.InventoryResult(product, groupedEntries, canOpen = canOpen, canPrint = canPrint, parentStock = parentStock)
                 } catch (_: Exception) {
                     _state.value = AppState.Error("Failed to fetch stock entries.")
                 }
@@ -596,6 +647,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 val updatedData = api.getProductById(productId)
                 val remaining = updatedData.stock_amount ?: 0.0
                 val stockStr = if (remaining % 1.0 == 0.0) remaining.toInt().toString() else remaining.toString()
+                val parentStock = fetchParentStock(updatedData.product, remaining)
 
                 _state.value = AppState.Success(
                     message = "Success!",
@@ -606,7 +658,8 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                     addedAmount = if (_currentMode.value == AppMode.PURCHASE) amount else 1.0,
                     lastScannedBarcode = scannedBarcode,
                     lastPrice = price,
-                    lastExpireDate = expireDate
+                    lastExpireDate = expireDate,
+                    parentStock = parentStock
                 )
                 
                 if (autoPrint && _currentMode.value == AppMode.PURCHASE) {

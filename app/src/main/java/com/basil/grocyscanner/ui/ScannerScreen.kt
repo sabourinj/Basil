@@ -269,6 +269,11 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                         Text(text = currentState.stockMessage, style = MaterialTheme.typography.titleMedium, color = Color.LightGray, textAlign = TextAlign.Center)
                     }
 
+                    currentState.parentStock?.let {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        ParentStockBadge(it)
+                    }
+
                     if (currentState.product != null) {
                         val prodId = currentState.product.id
                         if (currentMode == AppMode.PURCHASE && currentState.currentStock > 0.0) {
@@ -339,6 +344,7 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                     ShoppingListView(
                         items = currentState.items,
                         newlyAddedProductId = currentState.newlyAddedProductId,
+                        scanError = currentState.scanError,
                         onToggleDone = { item -> viewModel.markItemAsDone(item) }
                     )
                 }
