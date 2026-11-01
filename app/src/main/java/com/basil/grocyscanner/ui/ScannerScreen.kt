@@ -334,6 +334,7 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                     ShoppingListView(
                         items = currentState.items,
                         newlyAddedProductId = currentState.newlyAddedProductId,
+                        scanError = currentState.scanError,
                         onToggleDone = { item -> viewModel.markItemAsDone(item) }
                     )
                 }

@@ -39,7 +39,8 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         data class ShoppingList(
             val items: List<ShoppingListItem>,
             val scanErrorTrigger: Long = 0L,
-            val newlyAddedProductId: Int? = null
+            val newlyAddedProductId: Int? = null,
+            val scanError: String? = null
         ) : AppState()
         data class NeedsDate(
             val product: ProductDetails,
@@ -94,6 +95,20 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
 
     private var lastScanTime = 0L
     private var lastScannedBarcode = ""
+
+    companion object {
+        const val INVALID_SCAN_MESSAGE = "Not a product code"
+
+        // Scans matching any of these are rejected rather than sent to Grocy.
+        // Catches URL QR codes, e.g. the "SmartLabel" codes next to UPCs.
+        // Kept in step with basil-capture's DEFAULT_REJECT_PATTERNS.
+        private val REJECT_PATTERNS = listOf(
+            Regex("^[a-z][a-z0-9+.-]*://", RegexOption.IGNORE_CASE),
+            Regex("^www\\.", RegexOption.IGNORE_CASE)
+        )
+
+        fun isRejectedScan(barcode: String) = REJECT_PATTERNS.any { it.containsMatchIn(barcode) }
+    }
 
     private val generativeModel by lazy {
         geminiApiKey?.let {
@@ -201,6 +216,12 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             return
         }
         if (currentState is AppState.ShoppingList) {
+            if (isRejectedScan(barcode)) {
+                // e.g. a URL QR code. Never sent to Grocy; flagged in the list instead.
+                Log.d("BasilDebug", "Scan rejected: $barcode")
+                _state.value = currentState.copy(scanErrorTrigger = System.currentTimeMillis(), scanError = INVALID_SCAN_MESSAGE)
+                return
+            }
             viewModelScope.launch {
                 try {
                     val response = api.getProductByBarcode(barcode)
@@ -233,6 +254,11 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             return
         }
         if (currentState is AppState.LinkingChild) {
+            if (isRejectedScan(barcode)) {
+                Log.d("BasilDebug", "Scan rejected: $barcode")
+                _state.value = AppState.Error(INVALID_SCAN_MESSAGE)
+                return
+            }
             _state.value = AppState.ChildQuantityPrompt(currentState.product, currentState.parentBarcode, barcode)
             return
         }
@@ -245,6 +271,14 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
 
         lastScannedBarcode = barcode
         lastScanTime = currentTime
+
+        if (isRejectedScan(barcode)) {
+            // e.g. a URL QR code. Never sent to Grocy, but still shown as an
+            // error so the scan doesn't look like it went unnoticed.
+            Log.d("BasilDebug", "Scan rejected: $barcode")
+            _state.value = AppState.Error(INVALID_SCAN_MESSAGE)
+            return
+        }
 
         viewModelScope.launch {
             if (_currentMode.value == AppMode.BATCH_MOVE) {
