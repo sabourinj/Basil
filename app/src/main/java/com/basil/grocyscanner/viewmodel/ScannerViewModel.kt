@@ -745,7 +745,8 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                         }
                     }
                     "do_not_buy" -> {
-                        api.updateProduct(productId, mapOf("do_not_buy" to 1))
+                        // do_not_buy is a checkbox userfield (created in MainActivity), not a product column
+                        api.updateProductUserfields(productId, mapOf("do_not_buy" to "1"))
                         val successState = _state.value as? AppState.Success
                         if (successState != null) {
                             _state.value = successState.copy(isDoNotBuySet = true)

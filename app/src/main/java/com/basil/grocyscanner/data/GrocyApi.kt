@@ -86,4 +86,7 @@ interface GrocyApi {
 
     @GET("userfields/products/{productId}")
     suspend fun getProductUserfields(@Path("productId") productId: Int): Map<String, Any>
+
+    @PUT("userfields/products/{productId}")
+    suspend fun updateProductUserfields(@Path("productId") productId: Int, @Body userfields: @JvmSuppressWildcards Map<String, Any>)
 }
