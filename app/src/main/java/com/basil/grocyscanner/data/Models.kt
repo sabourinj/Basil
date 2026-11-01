@@ -8,10 +8,10 @@ data class ProductResponse(
     val barcode: BarcodeDetails? = null
 )
 
-// Combined stock across a parent product and all of its children
+// Stock held by the scanned product's siblings (parent family total minus the scanned product)
 data class ParentStock(
     val name: String,
-    val totalAmount: Double
+    val otherAmount: Double
 )
 
 data class ProductDetails(

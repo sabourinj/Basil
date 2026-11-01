@@ -20,12 +20,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.basil.grocyscanner.data.ParentStock
 
-// Subtle pill showing combined stock across the scanned product's parent (e.g. all tortillas)
+fun parentStockLabel(parentStock: ParentStock): String {
+    val amount = parentStock.otherAmount
+    val amountStr = if (amount % 1.0 == 0.0) amount.toInt().toString() else amount.toString()
+    return "+$amountStr more in ${parentStock.name}"
+}
+
+// Subtle pill showing how much sibling stock exists under the scanned product's parent (e.g. other tortillas)
 @Composable
 fun ParentStockBadge(parentStock: ParentStock, modifier: Modifier = Modifier) {
-    val amount = parentStock.totalAmount
-    val amountStr = if (amount % 1.0 == 0.0) amount.toInt().toString() else amount.toString()
-
     Row(
         modifier = modifier
             .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(50))
@@ -40,7 +43,7 @@ fun ParentStockBadge(parentStock: ParentStock, modifier: Modifier = Modifier) {
             modifier = Modifier.size(14.dp)
         )
         Text(
-            text = "$amountStr in ${parentStock.name}",
+            text = parentStockLabel(parentStock),
             style = MaterialTheme.typography.labelMedium,
             color = Color.LightGray,
             fontWeight = FontWeight.Medium,

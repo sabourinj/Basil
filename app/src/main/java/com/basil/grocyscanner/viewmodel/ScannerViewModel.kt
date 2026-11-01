@@ -424,11 +424,14 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         }
     }
 
-    private suspend fun fetchParentStock(product: ProductDetails?): ParentStock? {
+    // Returns null when the product has no parent or its siblings have no stock
+    private suspend fun fetchParentStock(product: ProductDetails?, ownAmount: Double): ParentStock? {
         val parentId = product?.parent_product_id ?: return null
         return try {
             val parent = api.getProductById(parentId)
-            ParentStock(parent.product.name, parent.stock_amount_aggregated ?: parent.stock_amount ?: 0.0)
+            val familyTotal = parent.stock_amount_aggregated ?: parent.stock_amount ?: 0.0
+            val others = familyTotal - ownAmount
+            if (others > 0.0) ParentStock(parent.product.name, others) else null
         } catch (e: Exception) {
             Log.e("BasilDebug", "Failed to fetch parent stock: ${e.message}")
             null
@@ -496,7 +499,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                             )
                         }
                         .sortedBy { it.best_before_date }
-                    val parentStock = fetchParentStock(product)
+                    val parentStock = fetchParentStock(product, rawEntries.sumOf { it.amount })
                     _state.value = AppState.InventoryResult(product, groupedEntries, canOpen = canOpen, canPrint = canPrint, parentStock = parentStock)
                 } catch (_: Exception) {
                     _state.value = AppState.Error("Failed to fetch stock entries.")
@@ -609,7 +612,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 val updatedData = api.getProductById(productId)
                 val remaining = updatedData.stock_amount ?: 0.0
                 val stockStr = if (remaining % 1.0 == 0.0) remaining.toInt().toString() else remaining.toString()
-                val parentStock = fetchParentStock(updatedData.product)
+                val parentStock = fetchParentStock(updatedData.product, remaining)
 
                 _state.value = AppState.Success(
                     message = "Success!",
