@@ -246,6 +246,10 @@ fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.Inve
 
     if (currentState.entries.isEmpty()) {
         Text("No stock found!", color = ErrorRed, style = MaterialTheme.typography.titleMedium)
+        currentState.parentStock?.let {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(parentStockLabel(it), color = Color.LightGray, style = MaterialTheme.typography.bodyMedium)
+        }
     } else {
         Card(
             colors = CardDefaults.cardColors(containerColor = DarkerHeaderPurple),
@@ -296,6 +300,11 @@ fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.Inve
                             Text(text = dateStr, color = dateColor, modifier = Modifier.weight(0.7f))
                         }
                     }
+                }
+
+                currentState.parentStock?.let {
+                    HorizontalDivider(color = Color.Gray, modifier = Modifier.padding(vertical = 8.dp))
+                    Text(parentStockLabel(it), color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
