@@ -59,6 +59,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             val isPrinting: Boolean = false,
             val isOpened: Boolean = false,
             val isAddingToList: Boolean = false,
+            val isDoNotBuySet: Boolean = false,
             val lastScannedBarcode: String? = null,
             val lastPrice: Double? = null,
             val lastExpireDate: String? = null,
@@ -741,6 +742,14 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                                 api.printLabel(productId)
                             }
                             delay(100) // Small delay between repeat prints
+                        }
+                    }
+                    "do_not_buy" -> {
+                        // do_not_buy is a checkbox userfield (created in MainActivity), not a product column
+                        api.updateProductUserfields(productId, mapOf("do_not_buy" to "1"))
+                        val successState = _state.value as? AppState.Success
+                        if (successState != null) {
+                            _state.value = successState.copy(isDoNotBuySet = true)
                         }
                     }
                 }
