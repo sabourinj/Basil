@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -47,12 +48,14 @@ import com.basil.grocyscanner.data.SecurePrefs
 import com.basil.grocyscanner.data.ShoppingListItem
 import com.basil.grocyscanner.ui.theme.DarkerHeaderPurple
 import com.basil.grocyscanner.ui.theme.DeepPurple
+import com.basil.grocyscanner.ui.theme.ErrorRed
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ShoppingListView(
     items: List<ShoppingListItem>,
     newlyAddedProductId: Int? = null,
+    scanError: String? = null,
     onToggleDone: (ShoppingListItem) -> Unit
 ) {
     val context = LocalContext.current
@@ -77,6 +80,16 @@ fun ShoppingListView(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
+        if (scanError != null) {
+            Text(
+                text = scanError,
+                color = ErrorRed,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+            )
+        }
         if (items.isEmpty()) {
             Text("List is empty", color = Color.Gray, modifier = Modifier.padding(16.dp))
         } else {
