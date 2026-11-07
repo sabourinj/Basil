@@ -7,15 +7,23 @@ import com.basil.grocyscanner.data.*
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.generationConfig
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import retrofit2.HttpException
+import java.io.IOException
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
 enum class AppMode { PURCHASE, CONSUME, INVENTORY, BATCH_MOVE }
+
+// Audible outcomes. Plain success is deliberately absent: the screen and the
+// haptic already confirm it, and an extra chirp on every good scan trains you
+// to tune the sounds out (the same call basil-capture makes).
+enum class ScanSound { ERROR, SERVER_ERROR, PRINTED, UNDONE }
 
 class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: String?) : ViewModel() {
     private val categoriesRequiringDate = listOf(3, 5, 8)
@@ -93,6 +101,29 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
 
     private val _state = MutableStateFlow<AppState>(AppState.Idle)
     val state: StateFlow<AppState> = _state
+
+    // One-shot sound cues for the screen to play. Events, not state: a sound
+    // must play once per occurrence and never replay on recomposition.
+    private val _sounds = MutableSharedFlow<ScanSound>(extraBufferCapacity = 4)
+    val sounds: SharedFlow<ScanSound> = _sounds
+
+    private fun playSound(sound: ScanSound) {
+        _sounds.tryEmit(sound)
+    }
+
+    // Same split as basil-capture's GrocyError.server_side: "Grocy is
+    // unreachable" (network failure, 5xx) is not the item's fault, so it gets
+    // its own sound, distinct from "Grocy refused this item".
+    private fun errorSoundFor(cause: Throwable?): ScanSound = when {
+        cause is IOException -> ScanSound.SERVER_ERROR
+        cause is HttpException && cause.code() >= 500 -> ScanSound.SERVER_ERROR
+        else -> ScanSound.ERROR
+    }
+
+    private fun showError(message: String, cause: Throwable? = null) {
+        _state.value = AppState.Error(message)
+        playSound(errorSoundFor(cause))
+    }
 
     private val _currentMode = MutableStateFlow(AppMode.PURCHASE)
     val currentMode: StateFlow<AppMode> = _currentMode
@@ -187,7 +218,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             _state.value = AppState.ShoppingList(enrichedItems)
         } catch (e: Exception) {
             Log.e("BasilDebug", "Failed to fetch shopping list", e)
-            _state.value = AppState.Error("Failed to fetch shopping list")
+            showError("Failed to fetch shopping list", e)
         }
     }
 
@@ -217,6 +248,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         val currentState = _state.value
         if (currentState is AppState.NeedsDate) {
             _state.value = currentState.copy(scanErrorTrigger = System.currentTimeMillis())
+            playSound(ScanSound.ERROR)
             return
         }
         if (currentState is AppState.ShoppingList) {
@@ -224,6 +256,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 // e.g. a URL QR code. Never sent to Grocy; flagged in the list instead.
                 Log.d("BasilDebug", "Scan rejected: $barcode")
                 _state.value = currentState.copy(scanErrorTrigger = System.currentTimeMillis(), scanError = INVALID_SCAN_MESSAGE)
+                playSound(ScanSound.ERROR)
                 return
             }
             viewModelScope.launch {
@@ -253,6 +286,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                     _state.value = AppState.ShoppingList(items = enrichedItems, newlyAddedProductId = product.id)
                 } catch (e: Exception) {
                     _state.value = currentState.copy(scanErrorTrigger = System.currentTimeMillis())
+                    playSound(errorSoundFor(e))
                 }
             }
             return
@@ -260,7 +294,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         if (currentState is AppState.LinkingChild) {
             if (isRejectedScan(barcode)) {
                 Log.d("BasilDebug", "Scan rejected: $barcode")
-                _state.value = AppState.Error(INVALID_SCAN_MESSAGE)
+                showError(INVALID_SCAN_MESSAGE)
                 return
             }
             _state.value = AppState.ChildQuantityPrompt(currentState.product, currentState.parentBarcode, barcode)
@@ -280,7 +314,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             // e.g. a URL QR code. Never sent to Grocy, but still shown as an
             // error so the scan doesn't look like it went unnoticed.
             Log.d("BasilDebug", "Scan rejected: $barcode")
-            _state.value = AppState.Error(INVALID_SCAN_MESSAGE)
+            showError(INVALID_SCAN_MESSAGE)
             return
         }
 
@@ -316,7 +350,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             val totalAvailableToMove = availableOutsideDestination.sumOf { it.amount }
 
             if (totalAvailableToMove <= 0) {
-                _state.value = AppState.Error("No stock found outside of $locationName.")
+                showError("No stock found outside of $locationName.")
                 return
             }
 
@@ -328,7 +362,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             val sourceLocationId = sourceEntry?.location_id ?: product.location_id
 
             if (sourceLocationId == null) {
-                _state.value = AppState.Error("Unable to determine source location.")
+                showError("Unable to determine source location.")
                 return
             }
 
@@ -357,16 +391,16 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             Log.e("BasilDebug", "Batch Move HTTP Error ${e.code()}: $errorBody")
 
             if (e.code() == 400) {
-                _state.value = AppState.Error("Product not found in Grocy.")
+                showError("Product not found in Grocy.")
             } else if (e.code() == 405) {
                 val detail = if (currentProduct?.is_parent == 1) " (Parent Product)" else ""
-                _state.value = AppState.Error("Move not allowed$detail. Check settings.")
+                showError("Move not allowed$detail. Check settings.")
             } else {
-                _state.value = AppState.Error("Move failed: HTTP ${e.code()}")
+                showError("Move failed: HTTP ${e.code()}", e)
             }
         } catch (e: Exception) {
             Log.e("BasilDebug", "Batch Move failed", e)
-            _state.value = AppState.Error("Connection Error: Check your network.")
+            showError("Connection Error: Check your network.", e)
         }
     }
 
@@ -390,7 +424,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             barcodeId = response.barcode?.id ?: bDetails?.id
         } catch (e: HttpException) {
             if (_currentMode.value == AppMode.INVENTORY || _currentMode.value == AppMode.CONSUME) {
-                _state.value = AppState.Error("Product not found in Grocy.")
+                showError("Product not found in Grocy.")
                 return
             }
 
@@ -418,17 +452,17 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             } catch (e: HttpException) {
                 if (e.code() == 400) {
                     val detail = if (externalLookupError != null) "\n($externalLookupError)" else ""
-                    _state.value = AppState.Error("Barcode not recognized.$detail")
+                    showError("Barcode not recognized.$detail")
                 } else {
-                    _state.value = AppState.Error("HTTP ${e.code()}: Unable to identify product.")
+                    showError("HTTP ${e.code()}: Unable to identify product.", e)
                 }
                 return
             } catch (e: Exception) {
-                _state.value = AppState.Error("Connection error: ${e.message}")
+                showError("Connection error: ${e.message}", e)
                 return
             }
         } catch (e: Exception) {
-            _state.value = AppState.Error("Connection Error: Check your network.")
+            showError("Connection Error: Check your network.", e)
             return
         }
 
@@ -539,8 +573,8 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                         .sortedBy { it.best_before_date }
                     val parentStock = fetchParentStock(product, rawEntries.sumOf { it.amount })
                     _state.value = AppState.InventoryResult(product, groupedEntries, canOpen = canOpen, canPrint = canPrint, parentStock = parentStock)
-                } catch (_: Exception) {
-                    _state.value = AppState.Error("Failed to fetch stock entries.")
+                } catch (e: Exception) {
+                    showError("Failed to fetch stock entries.", e)
                 }
             }
             AppMode.CONSUME -> confirmAction(product.id, amount, null, null)
@@ -670,17 +704,17 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 )
 
                 if (autoPrint && _currentMode.value == AppMode.PURCHASE) {
-                    performQuickAction(productId, "print", lastStockUuid, amount)
+                    performQuickAction(productId, "print", lastStockUuid, amount, announce = true)
                 }
 
             } catch (e: HttpException) {
                 if (_currentMode.value == AppMode.CONSUME && e.code() == 400) {
-                    _state.value = AppState.Error("No stock found to consume!")
+                    showError("No stock found to consume!")
                 } else {
-                    _state.value = AppState.Error("HTTP ${e.code()}: Action failed")
+                    showError("HTTP ${e.code()}: Action failed", e)
                 }
             } catch (e: Exception) {
-                _state.value = AppState.Error("Connection Error: Action failed")
+                showError("Connection Error: Action failed", e)
             } finally {
                 isProcessingAction = false
             }
@@ -712,21 +746,25 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                     parentStock = fetchParentStock(updatedData.product, remaining),
                     isUndone = true
                 )
+                playSound(ScanSound.UNDONE)
             } catch (e: HttpException) {
                 val body = e.response()?.errorBody()?.string().orEmpty()
-                _state.value = AppState.Error(
+                showError(
                     if (e.code() == 400 && body.contains("undone", ignoreCase = true)) "Already undone"
-                    else "HTTP ${e.code()}: Undo failed"
+                    else "HTTP ${e.code()}: Undo failed",
+                    e
                 )
             } catch (e: Exception) {
-                _state.value = AppState.Error("Connection Error: Undo failed")
+                showError("Connection Error: Undo failed", e)
             } finally {
                 isProcessingAction = false
             }
         }
     }
 
-    fun performQuickAction(productId: Int, action: String, stockId: String? = null, amount: Double = 1.0) {
+    // announce: play the "printed" sound once the labels are sent. Used for the
+    // purchase auto-print, which happens without the user tapping anything.
+    fun performQuickAction(productId: Int, action: String, stockId: String? = null, amount: Double = 1.0, announce: Boolean = false) {
         viewModelScope.launch {
             try {
                 when(action) {
@@ -788,6 +826,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                             }
                             delay(100) // Small delay between repeat prints
                         }
+                        if (announce) playSound(ScanSound.PRINTED)
                     }
                     "do_not_buy" -> {
                         // do_not_buy is a checkbox userfield (created in MainActivity), not a product column
@@ -799,7 +838,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                     }
                 }
             } catch (e: Exception) {
-                _state.value = AppState.Error("Connection Error: Quick action failed")
+                showError("Connection Error: Quick action failed", e)
             }
         }
     }
@@ -853,7 +892,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
 
             } catch (e: Exception) {
                 Log.e("BasilDebug", "Linking failed", e)
-                _state.value = AppState.Error("Connection Error: Linking failed")
+                showError("Connection Error: Linking failed", e)
             }
         }
     }

@@ -50,6 +50,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -90,6 +91,14 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
     val vibrator = remember {
         val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
         vibratorManager.defaultVibrator
+    }
+
+    val scanSounds = remember { ScanSounds(context.applicationContext) }
+    DisposableEffect(scanSounds) {
+        onDispose { scanSounds.release() }
+    }
+    LaunchedEffect(viewModel) {
+        viewModel.sounds.collect { scanSounds.play(it) }
     }
 
     LaunchedEffect(state) {
