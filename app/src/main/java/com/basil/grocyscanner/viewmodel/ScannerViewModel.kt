@@ -762,7 +762,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         }
     }
 
-    // announce: play the "printed" sound once the labels are sent. Used for the
+    // announce: play the "printed" sound as printing starts. Used for the
     // purchase auto-print, which happens without the user tapping anything.
     fun performQuickAction(productId: Int, action: String, stockId: String? = null, amount: Double = 1.0, announce: Boolean = false) {
         viewModelScope.launch {
@@ -812,6 +812,10 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                                 _state.value = inventoryState.copy(isPrinting = true)
                             }
                         }
+                        // With the pulsing print button, not after the label
+                        // requests return. A failed print still follows with
+                        // the error sound.
+                        if (announce) playSound(ScanSound.PRINTED)
 
                         repeat(printCount) {
                             try {
@@ -826,7 +830,6 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                             }
                             delay(100) // Small delay between repeat prints
                         }
-                        if (announce) playSound(ScanSound.PRINTED)
                     }
                     "do_not_buy" -> {
                         // do_not_buy is a checkbox userfield (created in MainActivity), not a product column
