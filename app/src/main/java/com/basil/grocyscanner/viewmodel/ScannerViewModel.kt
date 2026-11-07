@@ -63,7 +63,10 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             val lastScannedBarcode: String? = null,
             val lastPrice: Double? = null,
             val lastExpireDate: String? = null,
-            val parentStock: ParentStock? = null
+            val parentStock: ParentStock? = null,
+            // Grocy transaction of a consume, offered for Undo while this screen is up.
+            val transactionId: String? = null,
+            val isUndone: Boolean = false
         ) : AppState()
         data class Error(val error: String) : AppState()
         data class InventoryResult(
@@ -635,13 +638,16 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         viewModelScope.launch {
             _state.value = AppState.Loading(if (_currentMode.value == AppMode.PURCHASE) "Adding stock..." else "Consuming stock...", showGrocy = true)
             var lastStockUuid: String? = null
+            var consumeTransactionId: String? = null
 
             try {
                 if (_currentMode.value == AppMode.PURCHASE) {
                     val result = api.addStock(productId, AddStockRequest(amount, price, expireDate))
                     lastStockUuid = result.firstOrNull()?.stock_id
                 } else {
-                    api.consumeStock(productId, ConsumeStockRequest(amount))
+                    val result = api.consumeStock(productId, ConsumeStockRequest(amount))
+                    // No id means no Undo button, rather than a button that can't work.
+                    consumeTransactionId = result.firstNotNullOfOrNull { it.transaction_id }
                 }
 
                 val updatedData = api.getProductById(productId)
@@ -659,9 +665,10 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                     lastScannedBarcode = scannedBarcode,
                     lastPrice = price,
                     lastExpireDate = expireDate,
-                    parentStock = parentStock
+                    parentStock = parentStock,
+                    transactionId = consumeTransactionId
                 )
-                
+
                 if (autoPrint && _currentMode.value == AppMode.PURCHASE) {
                     performQuickAction(productId, "print", lastStockUuid, amount)
                 }
@@ -678,6 +685,44 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 isProcessingAction = false
             }
 
+        }
+    }
+
+    fun undoConsume() {
+        val success = _state.value as? AppState.Success ?: return
+        val transactionId = success.transactionId ?: return
+        val product = success.product ?: return
+        if (isProcessingAction) return
+        isProcessingAction = true
+
+        viewModelScope.launch {
+            _state.value = AppState.Loading("Undoing...", showGrocy = true)
+            try {
+                api.undoTransaction(transactionId)
+
+                val updatedData = api.getProductById(product.id)
+                val remaining = updatedData.stock_amount ?: 0.0
+                val stockStr = if (remaining % 1.0 == 0.0) remaining.toInt().toString() else remaining.toString()
+
+                _state.value = AppState.Success(
+                    message = "Undone",
+                    stockMessage = "Remaining stock: $stockStr",
+                    product = updatedData.product,
+                    currentStock = remaining,
+                    parentStock = fetchParentStock(updatedData.product, remaining),
+                    isUndone = true
+                )
+            } catch (e: HttpException) {
+                val body = e.response()?.errorBody()?.string().orEmpty()
+                _state.value = AppState.Error(
+                    if (e.code() == 400 && body.contains("undone", ignoreCase = true)) "Already undone"
+                    else "HTTP ${e.code()}: Undo failed"
+                )
+            } catch (e: Exception) {
+                _state.value = AppState.Error("Connection Error: Undo failed")
+            } finally {
+                isProcessingAction = false
+            }
         }
     }
 

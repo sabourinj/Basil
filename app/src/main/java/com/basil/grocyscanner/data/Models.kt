@@ -82,7 +82,9 @@ data class StockLogEntry(
     val product_id: Int,
     val amount: Double,
     val best_before_date: String?,
-    val stock_id: String?
+    val stock_id: String?,
+    // Shared by every booking of one add/consume; undoing it reverts them all.
+    val transaction_id: String? = null
 )
 
 data class ConsumeStockRequest(
