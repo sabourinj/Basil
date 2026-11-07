@@ -86,9 +86,10 @@ private fun SetupScaffold(content: @Composable ColumnScope.() -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Spacer(modifier = Modifier.height(24.dp))
-        Image(painter = painterResource(id = R.drawable.basil_logo), contentDescription = "Basil Logo", modifier = Modifier.size(72.dp))
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(text = "Basil", style = MaterialTheme.typography.headlineLarge, color = Color.White, fontWeight = FontWeight.Bold)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(text = "Basil", style = MaterialTheme.typography.headlineLarge, color = Color.White, fontWeight = FontWeight.Bold)
+            Image(painter = painterResource(id = R.drawable.basil_logo), contentDescription = "Basil Logo", modifier = Modifier.size(56.dp))
+        }
 
         Column(
             modifier = Modifier.fillMaxWidth().weight(1f),
@@ -99,6 +100,8 @@ private fun SetupScaffold(content: @Composable ColumnScope.() -> Unit) {
     }
 }
 
+private val GEMINI_LOGO_SIZE = 80.dp
+
 @Composable
 fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
     var step by remember { mutableIntStateOf(1) }
@@ -108,7 +111,7 @@ fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
             Image(
                 painter = painterResource(id = R.drawable.gemini_logo),
                 contentDescription = "Gemini Logo",
-                modifier = Modifier.size(120.dp)
+                modifier = Modifier.size(GEMINI_LOGO_SIZE)
             )
             Spacer(modifier = Modifier.height(24.dp))
 
@@ -130,7 +133,7 @@ fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
             Image(
                 painter = painterResource(id = R.drawable.gemini_logo),
                 contentDescription = "Gemini Logo",
-                modifier = Modifier.size(120.dp)
+                modifier = Modifier.size(GEMINI_LOGO_SIZE)
             )
             Spacer(modifier = Modifier.height(24.dp))
             Text("API Key Required", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
