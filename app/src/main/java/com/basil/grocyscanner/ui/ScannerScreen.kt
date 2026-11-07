@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.AddLink
 import androidx.compose.material.icons.filled.AddShoppingCart
@@ -49,6 +50,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -89,6 +91,14 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
     val vibrator = remember {
         val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
         vibratorManager.defaultVibrator
+    }
+
+    val scanSounds = remember { ScanSounds(context.applicationContext) }
+    DisposableEffect(scanSounds) {
+        onDispose { scanSounds.release() }
+    }
+    LaunchedEffect(viewModel) {
+        viewModel.sounds.collect { scanSounds.play(it) }
     }
 
     LaunchedEffect(state) {
@@ -305,9 +315,17 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                                     ) { Icon(imageVector = Icons.Filled.AddLink, contentDescription = "Link Child", modifier = Modifier.size(32.dp)) }
                                 }
                             }
-                        } else if (currentMode == AppMode.CONSUME) {
+                        } else if (currentMode == AppMode.CONSUME && !currentState.isUndone) {
                             Spacer(modifier = Modifier.height(32.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                                if (currentState.transactionId != null) {
+                                    FilledIconButton(
+                                        onClick = { viewModel.undoConsume() },
+                                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White, contentColor = DeepPurple),
+                                        modifier = Modifier.size(64.dp)
+                                    ) { Icon(imageVector = Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo Consume", modifier = Modifier.size(32.dp)) }
+                                }
+
                                 FilledIconButton(
                                     onClick = { viewModel.performQuickAction(prodId, "shopping_list") },
                                     colors = IconButtonDefaults.filledIconButtonColors(

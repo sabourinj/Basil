@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -74,20 +75,43 @@ import com.mikepenz.aboutlibraries.Libs
 import com.mikepenz.aboutlibraries.ui.compose.m3.LibrariesContainer
 import com.mikepenz.aboutlibraries.util.withContext
 
+/**
+ * First-run setup layout: the Basil logo and name across the top, with the
+ * step's own content (Grocy or Gemini) centered in the space below it.
+ */
+@Composable
+private fun SetupScaffold(content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Spacer(modifier = Modifier.height(24.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(text = "Basil", style = MaterialTheme.typography.headlineLarge, color = Color.White, fontWeight = FontWeight.Bold)
+            Image(painter = painterResource(id = R.drawable.basil_logo), contentDescription = "Basil Logo", modifier = Modifier.size(56.dp))
+        }
+
+        Column(
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            content = content
+        )
+    }
+}
+
+private val GEMINI_LOGO_SIZE = 80.dp
+
 @Composable
 fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
     var step by remember { mutableIntStateOf(1) }
 
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
+    SetupScaffold {
         if (step == 1) {
             Image(
                 painter = painterResource(id = R.drawable.gemini_logo),
                 contentDescription = "Gemini Logo",
-                modifier = Modifier.size(120.dp)
+                modifier = Modifier.size(GEMINI_LOGO_SIZE)
             )
             Spacer(modifier = Modifier.height(24.dp))
 
@@ -109,7 +133,7 @@ fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
             Image(
                 painter = painterResource(id = R.drawable.gemini_logo),
                 contentDescription = "Gemini Logo",
-                modifier = Modifier.size(120.dp)
+                modifier = Modifier.size(GEMINI_LOGO_SIZE)
             )
             Spacer(modifier = Modifier.height(24.dp))
             Text("API Key Required", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
@@ -123,7 +147,7 @@ fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
 
 @Composable
 fun UnconfiguredScreen() {
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+    SetupScaffold {
         Image(painter = painterResource(id = R.drawable.grocy_logo), contentDescription = "Grocy Logo", modifier = Modifier.size(180.dp))
         Text("API Key Required", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(16.dp))

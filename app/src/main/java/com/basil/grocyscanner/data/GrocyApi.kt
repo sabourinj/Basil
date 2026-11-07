@@ -22,7 +22,11 @@ interface GrocyApi {
     suspend fun addStock(@Path("productId") productId: Int, @Body request: AddStockRequest): List<StockLogEntry>
 
     @POST("stock/products/{productId}/consume")
-    suspend fun consumeStock(@Path("productId") productId: Int, @Body request: ConsumeStockRequest)
+    suspend fun consumeStock(@Path("productId") productId: Int, @Body request: ConsumeStockRequest): List<StockLogEntry>
+
+    // Reverts every booking in the transaction. Grocy answers 204 with no body.
+    @POST("stock/transactions/{transactionId}/undo")
+    suspend fun undoTransaction(@Path("transactionId") transactionId: String)
 
     @POST("stock/products/{productId}/transfer")
     suspend fun transferStock(@Path("productId") productId: Int, @Body request: TransferStockRequest)
