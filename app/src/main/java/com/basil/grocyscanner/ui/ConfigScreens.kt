@@ -303,7 +303,7 @@ fun SettingsScreen(
             ) {
                 Icon(imageVector = Icons.Default.MoveDown, contentDescription = null, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(12.dp))
-                Text("Batch Mode", fontWeight = FontWeight.Bold)
+                Text("Transfer Mode", fontWeight = FontWeight.Bold)
             }
 
             Spacer(modifier = Modifier.height(48.dp))
@@ -517,7 +517,7 @@ fun BatchMoveModal(
                         modifier = Modifier.fillMaxWidth().height(56.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = DeepPurple)
                     ) {
-                        Text("Start Batch Mode", fontWeight = FontWeight.Bold)
+                        Text("Start Transfer Mode", fontWeight = FontWeight.Bold)
                     }
                     
                     Button(

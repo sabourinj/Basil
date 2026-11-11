@@ -585,7 +585,7 @@ class ScannerViewModel(
         val locationName = batchMoveLocationName ?: ""
         var currentProduct: ProductDetails? = null
         
-        _state.value = AppState.Loading("Moving product to $locationName...", showGrocy = true)
+        _state.value = AppState.Loading("Transferring to $locationName...", showGrocy = true)
         try {
             val response = api.getProductByBarcode(barcode)
             val product = response.product
@@ -633,26 +633,26 @@ class ScannerViewModel(
             val amountStr = if (moveAmount % 1.0 == 0.0) moveAmount.toInt().toString() else moveAmount.toString()
 
             _state.value = AppState.Success(
-                message = "Moved!",
-                stockMessage = "$amountStr units of ${product.name} relocated from $sourceLocName to $locationName",
+                message = "Transferred!",
+                stockMessage = "$amountStr units of ${product.name} transferred from $sourceLocName to $locationName",
                 product = product,
                 lastScannedBarcode = barcode,
                 addedAmount = moveAmount
             )
         } catch (e: HttpException) {
             val errorBody = e.response()?.errorBody()?.string() ?: ""
-            Log.e("BasilDebug", "Batch Move HTTP Error ${e.code()}: $errorBody")
+            Log.e("BasilDebug", "Transfer HTTP Error ${e.code()}: $errorBody")
 
             if (e.code() == 400) {
                 showError("Product not found in Grocy.")
             } else if (e.code() == 405) {
                 val detail = if (currentProduct?.is_parent == 1) " (Parent Product)" else ""
-                showError("Move not allowed$detail. Check settings.")
+                showError("Transfer not allowed$detail. Check settings.")
             } else {
-                showError("Move failed: HTTP ${e.code()}", e)
+                showError("Transfer failed: HTTP ${e.code()}", e)
             }
         } catch (e: Exception) {
-            Log.e("BasilDebug", "Batch Move failed", e)
+            Log.e("BasilDebug", "Transfer failed", e)
             showError("Connection Error: Check your network.", e)
         }
     }

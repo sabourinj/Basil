@@ -193,7 +193,7 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                             modifier = Modifier.fillMaxWidth(0.8f),
                             colors = ButtonDefaults.buttonColors(containerColor = ErrorRed, contentColor = DeepPurple)
                         ) {
-                            Text("End Batch Mode", fontWeight = FontWeight.Bold)
+                            Text("End Transfer Mode", fontWeight = FontWeight.Bold)
                         }
                     }
                 } else {
@@ -229,7 +229,7 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                 is ScannerViewModel.AppState.BatchMoveActive -> {
                     Icon(imageVector = Icons.Default.MoveDown, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(64.dp))
                     Spacer(modifier = Modifier.height(24.dp))
-                    Text("Batch Relocating to:", style = MaterialTheme.typography.titleMedium, color = Color.LightGray)
+                    Text("Transferring to:", style = MaterialTheme.typography.titleMedium, color = Color.LightGray)
                     Text(text = currentState.locationName, style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                     Spacer(modifier = Modifier.height(24.dp))
                     ReadyToScanBox(width = 220.dp, height = 130.dp, fontSize = 18.sp)
