@@ -37,7 +37,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -143,6 +142,13 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
             vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
         }
     }
+    // Errors clear on the same timer as every other result screen
+    LaunchedEffect(shopping?.scanErrorTrigger, shopping?.scanError) {
+        val trigger = shopping?.scanErrorTrigger ?: return@LaunchedEffect
+        if (shopping.scanError == null) return@LaunchedEffect
+        kotlinx.coroutines.delay(resetDurationSeconds * 1000L)
+        viewModel.clearShoppingScanError(trigger)
+    }
     LaunchedEffect(shopping?.sheet?.id) {
         val sheet = shopping?.sheet ?: return@LaunchedEffect
         if (sheet.isDoNotBuy) {
@@ -166,7 +172,10 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                     }
                 },
                 actions = {
-                    IconButton(onClick = { viewModel.showShoppingList() }) { 
+                    // Toggles: tapping it again leaves shopping mode
+                    IconButton(onClick = {
+                        if (state is ScannerViewModel.AppState.ShoppingList) viewModel.resetState() else viewModel.showShoppingList()
+                    }) {
                         Icon(
                             imageVector = Icons.Filled.ShoppingCart, 
                             contentDescription = "Shopping List", 
@@ -196,18 +205,23 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                             Text("End Transfer Mode", fontWeight = FontWeight.Bold)
                         }
                     }
+                } else if (state is ScannerViewModel.AppState.ShoppingList) {
+                    // Shopping has one job, so the mode buttons give way to its status
+                    ShoppingStatusBar(
+                        state = state as ScannerViewModel.AppState.ShoppingList,
+                        onExit = { viewModel.resetState() }
+                    )
                 } else {
-                    val isShoppingList = state is ScannerViewModel.AppState.ShoppingList
                     Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ModeButton("Purchase", currentMode == AppMode.PURCHASE && !isShoppingList) {
+                        ModeButton("Purchase", currentMode == AppMode.PURCHASE) {
                             if (currentMode != AppMode.PURCHASE) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             viewModel.setMode(AppMode.PURCHASE)
                         }
-                        ModeButton("Consume", currentMode == AppMode.CONSUME && !isShoppingList) {
+                        ModeButton("Consume", currentMode == AppMode.CONSUME) {
                             if (currentMode != AppMode.CONSUME) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             viewModel.setMode(AppMode.CONSUME)
                         }
-                        ModeButton("Inventory", currentMode == AppMode.INVENTORY && !isShoppingList) {
+                        ModeButton("Inventory", currentMode == AppMode.INVENTORY) {
                             if (currentMode != AppMode.INVENTORY) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             viewModel.setMode(AppMode.INVENTORY)
                         }
@@ -371,17 +385,12 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                 is ScannerViewModel.AppState.ShoppingList -> {
                     // The purchase sheet floats over the list, so the list stays in view.
                     Box(modifier = Modifier.fillMaxSize()) {
-                        Column(modifier = Modifier.fillMaxSize()) {
-                            if (currentState.isProcessing) {
-                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = SuccessGreen)
-                            }
-                            ShoppingListView(
-                                items = currentState.items,
-                                newlyAddedProductId = currentState.newlyAddedProductId,
-                                scanError = currentState.scanError,
-                                onToggleDone = { item -> viewModel.markItemAsDone(item) }
-                            )
-                        }
+                        // Progress and errors show in the bottom status bar
+                        ShoppingListView(
+                            items = currentState.items,
+                            newlyAddedProductId = currentState.newlyAddedProductId,
+                            onToggleDone = { item -> viewModel.markItemAsDone(item) }
+                        )
                         currentState.sheet?.let { sheet ->
                             PurchaseSheetCard(
                                 sheet = sheet,

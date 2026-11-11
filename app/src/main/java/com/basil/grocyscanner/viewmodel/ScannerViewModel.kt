@@ -504,6 +504,14 @@ class ScannerViewModel(
         }
     }
 
+    // Clears a shopping error once its timer runs out, unless a newer error replaced it
+    fun clearShoppingScanError(trigger: Long) {
+        val state = _state.value as? AppState.ShoppingList ?: return
+        if (state.scanErrorTrigger == trigger && state.scanError != null) {
+            _state.value = state.copy(scanError = null)
+        }
+    }
+
     fun dismissPurchaseSheet(sheetId: Long) {
         val state = _state.value as? AppState.ShoppingList ?: return
         if (state.sheet?.id == sheetId && state.sheet.isUndoing.not()) {
