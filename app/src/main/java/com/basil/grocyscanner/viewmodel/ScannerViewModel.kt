@@ -85,10 +85,15 @@ class ScannerViewModel(
             // List row to scroll to and pulse (the one a scan just checked off)
             val newlyAddedProductId: Int? = null,
             val scanError: String? = null,
-            // A scan is being purchased
+            // A scan is being purchased (or added, per processingLabel)
             val isProcessing: Boolean = false,
+            val processingLabel: String? = null,
             // Pop-up confirming the last purchase, shown over the list
-            val sheet: PurchaseSheet? = null
+            val sheet: PurchaseSheet? = null,
+            // The "+" is armed: the next scan goes on the list instead of being bought
+            val addNextScan: Boolean = false,
+            // Brief confirmation for the status bar, e.g. "Added to list: Ketchup"
+            val notice: String? = null
         ) : AppState()
         data class NeedsDate(
             val product: ProductDetails,
@@ -261,7 +266,7 @@ class ScannerViewModel(
             val items = enrichListItems(api.getShoppingList(), api.getProducts())
             // Keep an open purchase sheet across a refresh (e.g. a row tapped meanwhile)
             val sheet = (_state.value as? AppState.ShoppingList)?.sheet
-            _state.value = AppState.ShoppingList(items, sheet = sheet)
+            _state.value = AppState.ShoppingList(items, sheet = sheet, addNextScan = armedForAdd())
         } catch (e: Exception) {
             Log.e("BasilDebug", "Failed to fetch shopping list", e)
             showError("Failed to fetch shopping list", e)
@@ -294,32 +299,76 @@ class ScannerViewModel(
     private var lastShoppingPurchase: ShoppingPurchase? = null
     private val shoppingMutex = Mutex()
 
-    private suspend fun purchaseFromShoppingList(barcode: String) {
-        (_state.value as? AppState.ShoppingList)?.let { _state.value = it.copy(isProcessing = true) }
-        try {
-            // 1. Identify. A barcode Grocy doesn't know is created from
-            // OpenFoodFacts right here; Gemini fills in the rest later.
-            var isNew = false
-            val response = try {
-                api.getProductByBarcode(barcode)
-            } catch (e: HttpException) {
-                if (e.code() != 400) throw e
-                try {
-                    api.externalBarcodeLookup(barcode, true)
-                } catch (ex: Exception) {
-                    Log.w("BasilDebug", "External lookup failed: ${ex.message}")
-                }
-                isNew = true
-                try {
-                    api.getProductByBarcode(barcode)
-                } catch (e2: HttpException) {
-                    if (e2.code() == 400) {
-                        flagShoppingScanError("Barcode not recognized", null)
-                        return
-                    }
-                    throw e2
-                }
+    // Looks a shopping scan up in Grocy. A barcode Grocy doesn't know is created
+    // from OpenFoodFacts right here; Gemini fills in the rest later. Returns
+    // null (after flagging the error) when nobody recognizes it.
+    private suspend fun identifyShoppingScan(barcode: String, rearmAddOnFail: Boolean): Pair<ProductResponse, Boolean>? {
+        return try {
+            api.getProductByBarcode(barcode) to false
+        } catch (e: HttpException) {
+            if (e.code() != 400) throw e
+            try {
+                api.externalBarcodeLookup(barcode, true)
+            } catch (ex: Exception) {
+                Log.w("BasilDebug", "External lookup failed: ${ex.message}")
             }
+            try {
+                api.getProductByBarcode(barcode) to true
+            } catch (e2: HttpException) {
+                if (e2.code() == 400) {
+                    flagShoppingScanError("Barcode not recognized", null, rearmAddOnFail)
+                    return null
+                }
+                throw e2
+            }
+        }
+    }
+
+    // The "+" in the toolbar: the next scan goes on the list instead of being bought
+    fun toggleAddNextScanToList() {
+        val state = _state.value as? AppState.ShoppingList ?: return
+        _state.value = state.copy(addNextScan = !state.addNextScan)
+    }
+
+    private suspend fun addScanToShoppingList(barcode: String) {
+        (_state.value as? AppState.ShoppingList)?.let { _state.value = it.copy(isProcessing = true, processingLabel = "Adding to list…") }
+        try {
+            val (response, _) = identifyShoppingScan(barcode, rearmAddOnFail = true) ?: return
+            val product = response.product
+            api.addToShoppingList(AddToShoppingListRequest(product_id = product.id, amount = 1))
+            // Grocy adds to an existing row for the product. If that row was
+            // already checked off, it's needed again, so un-gray it.
+            api.getShoppingList()
+                .filter { it.product_id == product.id && isItemDone(it) }
+                .forEach { api.updateShoppingListItem(it.id, mapOf("done" to 0)) }
+
+            val items = enrichListItems(api.getShoppingList(), api.getProducts())
+            val current = _state.value as? AppState.ShoppingList
+            _state.value = AppState.ShoppingList(
+                items = items,
+                newlyAddedProductId = product.id,
+                sheet = current?.sheet,
+                notice = "Added to list: ${product.name}",
+                addNextScan = armedForAdd()
+            )
+        } catch (e: HttpException) {
+            flagShoppingScanError("HTTP ${e.code()}: Couldn't add to list", e, rearmAdd = true)
+        } catch (e: Exception) {
+            Log.e("BasilDebug", "Add to shopping list failed", e)
+            flagShoppingScanError("Connection Error: Couldn't add to list", e, rearmAdd = true)
+        }
+    }
+
+    fun clearShoppingNotice(notice: String) {
+        val state = _state.value as? AppState.ShoppingList ?: return
+        if (state.notice == notice) _state.value = state.copy(notice = null)
+    }
+
+    private suspend fun purchaseFromShoppingList(barcode: String) {
+        (_state.value as? AppState.ShoppingList)?.let { _state.value = it.copy(isProcessing = true, processingLabel = null) }
+        try {
+            // 1. Identify
+            val (response, isNew) = identifyShoppingScan(barcode, rearmAddOnFail = false) ?: return
             val product = response.product
             val amount = response.barcode?.amount ?: fetchBarcodeDetails(barcode)?.amount ?: 1.0
             val doNotBuy = isDoNotBuy(product.id)
@@ -390,7 +439,7 @@ class ScannerViewModel(
                 siblingsPending = workId != null && needsParent,
                 canUndo = transactionId != null
             )
-            _state.value = AppState.ShoppingList(items = items, newlyAddedProductId = match?.product_id, sheet = sheet)
+            _state.value = AppState.ShoppingList(items = items, newlyAddedProductId = match?.product_id, sheet = sheet, addNextScan = armedForAdd())
             if (doNotBuy) playSound(ScanSound.ERROR)
 
             if (workId != null && needsParent) watchEnrichment(workId, sheetId, product.id)
@@ -402,13 +451,21 @@ class ScannerViewModel(
         }
     }
 
-    private fun flagShoppingScanError(message: String, cause: Throwable?) {
+    // Whether the "+" is armed right now (it can be tapped while a scan is processing)
+    private fun armedForAdd(): Boolean = (_state.value as? AppState.ShoppingList)?.addNextScan ?: false
+
+    // rearmAdd: a failed add-to-list scan leaves the "+" armed, so a retry
+    // scan still goes on the list rather than being bought.
+    private fun flagShoppingScanError(message: String, cause: Throwable?, rearmAdd: Boolean = false) {
         val current = _state.value as? AppState.ShoppingList ?: return
         _state.value = current.copy(
             scanErrorTrigger = System.currentTimeMillis(),
             scanError = message,
             isProcessing = false,
-            sheet = null
+            processingLabel = null,
+            sheet = null,
+            notice = null,
+            addNextScan = current.addNextScan || rearmAdd
         )
         playSound(errorSoundFor(cause))
     }
@@ -488,7 +545,8 @@ class ScannerViewModel(
                     val currentSheet = current?.sheet?.takeIf { it.id == sheet.id } ?: sheet
                     _state.value = AppState.ShoppingList(
                         items = items,
-                        sheet = currentSheet.copy(isUndoing = false, isUndone = true, newStock = newStock)
+                        sheet = currentSheet.copy(isUndoing = false, isUndone = true, newStock = newStock),
+                        addNextScan = armedForAdd()
                     )
                     playSound(ScanSound.UNDONE)
                 } catch (e: Exception) {
@@ -552,9 +610,15 @@ class ScannerViewModel(
             }
             lastScannedBarcode = barcode
             lastScanTime = now
-            // Scans queue up rather than overlap: each one is a purchase.
+            // "Add next scan" applies to this one scan only; the one after
+            // goes back to purchasing.
+            val addToList = currentState.addNextScan
+            if (addToList) _state.value = currentState.copy(addNextScan = false)
+            // Scans queue up rather than overlap: each one changes Grocy.
             viewModelScope.launch {
-                shoppingMutex.withLock { purchaseFromShoppingList(barcode) }
+                shoppingMutex.withLock {
+                    if (addToList) addScanToShoppingList(barcode) else purchaseFromShoppingList(barcode)
+                }
             }
             return
         }

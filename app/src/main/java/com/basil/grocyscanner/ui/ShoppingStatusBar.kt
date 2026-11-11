@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddShoppingCart
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ShoppingCart
@@ -42,12 +44,22 @@ fun ShoppingStatusBar(state: ScannerViewModel.AppState.ShoppingList, onExit: () 
                 state.isProcessing -> {
                     CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = SuccessGreen)
                     Spacer(modifier = Modifier.width(12.dp))
-                    StatusText("Purchasing…", Color.White)
+                    StatusText(state.processingLabel ?: "Purchasing…", Color.White)
                 }
                 error != null -> {
                     Icon(imageVector = Icons.Filled.ErrorOutline, contentDescription = null, tint = ErrorRed, modifier = Modifier.size(24.dp))
                     Spacer(modifier = Modifier.width(12.dp))
                     StatusText(error, ErrorRed)
+                }
+                state.addNextScan -> {
+                    Icon(imageVector = Icons.Filled.AddShoppingCart, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
+                    StatusText("Scan to add to list", SuccessGreen)
+                }
+                state.notice != null -> {
+                    Icon(imageVector = Icons.Filled.CheckCircle, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
+                    StatusText(state.notice, Color.White)
                 }
                 else -> {
                     Icon(imageVector = Icons.Filled.ShoppingCart, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(24.dp))

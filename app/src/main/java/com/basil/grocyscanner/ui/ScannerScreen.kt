@@ -149,6 +149,12 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
         kotlinx.coroutines.delay(resetDurationSeconds * 1000L)
         viewModel.clearShoppingScanError(trigger)
     }
+    LaunchedEffect(shopping?.notice) {
+        val notice = shopping?.notice ?: return@LaunchedEffect
+        vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+        kotlinx.coroutines.delay(resetDurationSeconds * 1000L)
+        viewModel.clearShoppingNotice(notice)
+    }
     LaunchedEffect(shopping?.sheet?.id) {
         val sheet = shopping?.sheet ?: return@LaunchedEffect
         if (sheet.isDoNotBuy) {
@@ -172,15 +178,29 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                     }
                 },
                 actions = {
-                    // Toggles: tapping it again leaves shopping mode
-                    IconButton(onClick = {
-                        if (state is ScannerViewModel.AppState.ShoppingList) viewModel.resetState() else viewModel.showShoppingList()
-                    }) {
-                        Icon(
-                            imageVector = Icons.Filled.ShoppingCart, 
-                            contentDescription = "Shopping List", 
-                            tint = if (state is ScannerViewModel.AppState.ShoppingList) SuccessGreen else Color.White
-                        ) 
+                    val shoppingState = state as? ScannerViewModel.AppState.ShoppingList
+                    if (shoppingState != null) {
+                        // While shopping: arm the next scan to go on the list instead of
+                        // being bought. Filled in green while armed; tap again to cancel.
+                        FilledIconButton(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.toggleAddNextScanToList()
+                            },
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = if (shoppingState.addNextScan) SuccessGreen else Color.Transparent,
+                                contentColor = if (shoppingState.addNextScan) DeepPurple else Color.White
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.AddShoppingCart,
+                                contentDescription = if (shoppingState.addNextScan) "Cancel adding to list" else "Add next scan to list"
+                            )
+                        }
+                    } else {
+                        IconButton(onClick = { viewModel.showShoppingList() }) {
+                            Icon(imageVector = Icons.Filled.ShoppingCart, contentDescription = "Shopping List", tint = Color.White)
+                        }
                     }
                     IconButton(onClick = onNavigateToSettings) { Icon(imageVector = Icons.Filled.Settings, contentDescription = "Settings", tint = Color.White) }
                 },
