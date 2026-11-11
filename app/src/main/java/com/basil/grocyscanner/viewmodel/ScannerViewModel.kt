@@ -10,6 +10,8 @@ import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.generationConfig
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.UUID
@@ -445,8 +447,12 @@ class ScannerViewModel(
             try {
                 scheduler.observe(workId).first { it == null || it.state.isFinished }
                 if ((_state.value as? AppState.ShoppingList)?.sheet?.id != sheetId) return@launch
-                val product = api.getProductById(productId).product
-                val (parentName, siblings) = loadSiblings(product, api.getProducts())
+                val (product, allProducts) = coroutineScope {
+                    val product = async { api.getProductById(productId).product }
+                    val all = async { api.getProducts() }
+                    product.await() to all.await()
+                }
+                val (parentName, siblings) = loadSiblings(product, allProducts)
                 val current = _state.value as? AppState.ShoppingList ?: return@launch
                 val sheet = current.sheet?.takeIf { it.id == sheetId } ?: return@launch
                 _state.value = current.copy(sheet = sheet.copy(parentName = parentName, siblings = siblings, siblingsPending = false))

@@ -6,6 +6,7 @@ import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
@@ -45,6 +46,10 @@ class EnrichmentScheduler(context: Context) {
                 )
             )
             .setConstraints(networkConstraint)
+            // Run now, not whenever Android batches jobs: the open purchase
+            // sheet is waiting on this. Falls back to normal work if the
+            // app's expedited quota is used up.
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
         workManager.enqueueUniqueWork(ENRICHMENT_QUEUE, ExistingWorkPolicy.APPEND_OR_REPLACE, work)

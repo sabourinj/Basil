@@ -43,6 +43,8 @@ import kotlinx.coroutines.delay
 
 private const val SHEET_VISIBLE_MILLIS = 10_000L
 private const val UNDONE_VISIBLE_MILLIS = 3_000L
+// Longest the sheet waits for the background job before giving up on it
+private const val SIBLINGS_WAIT_CAP_MILLIS = 30_000L
 
 private fun formatAmount(amount: Double): String =
     if (amount % 1.0 == 0.0) amount.toInt().toString() else amount.toString()
@@ -58,9 +60,17 @@ fun PurchaseSheetCard(
 ) {
     // Closes itself so the next aisle needs no taps. The timer restarts for
     // each new purchase and after an Undo; it holds while an Undo is running.
-    LaunchedEffect(sheet.id, sheet.isUndone, sheet.isUndoing) {
+    // While the "already at home" list is still loading, the normal countdown
+    // waits for it (up to a cap), then starts fresh once it arrives.
+    LaunchedEffect(sheet.id, sheet.isUndone, sheet.isUndoing, sheet.siblingsPending) {
         if (sheet.isUndoing) return@LaunchedEffect
-        delay(if (sheet.isUndone) UNDONE_VISIBLE_MILLIS else SHEET_VISIBLE_MILLIS)
+        delay(
+            when {
+                sheet.isUndone -> UNDONE_VISIBLE_MILLIS
+                sheet.siblingsPending -> SIBLINGS_WAIT_CAP_MILLIS
+                else -> SHEET_VISIBLE_MILLIS
+            }
+        )
         onDismiss()
     }
 

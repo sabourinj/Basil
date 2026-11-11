@@ -7,6 +7,10 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.basil.grocyscanner.data.GeminiConfig
 import com.basil.grocyscanner.data.GrocyApi
+import com.basil.grocyscanner.data.GrocyLocation
+import com.basil.grocyscanner.data.GrocyProductGroup
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import com.basil.grocyscanner.data.NetworkClient
 import com.basil.grocyscanner.data.ProductDetails
 import com.basil.grocyscanner.data.SecurePrefs
@@ -24,6 +28,13 @@ import java.io.IOException
 // only products with no parent that track their own stock get one; the parent
 // is matched by case-insensitive name, or created as a no-own-stock,
 // hidden-from-overview product flagged with the parent_product userfield.
+private data class Lookups(
+    val product: ProductDetails,
+    val locations: List<GrocyLocation>,
+    val groups: List<GrocyProductGroup>,
+    val products: List<ProductDetails>
+)
+
 class EnrichmentWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
@@ -75,19 +86,26 @@ class EnrichmentWorker(context: Context, params: WorkerParameters) : CoroutineWo
         needsBestBefore: Boolean,
         stockId: String?
     ) {
-        val product = api.getProductById(productId).product
+        // All four lookups at once; the open purchase sheet is waiting on this job.
+        // The product list is fetched once and reused for parent matching: jobs
+        // run one at a time, so a parent an earlier job created is already in it.
+        val (product, locations, groups, allProducts) = coroutineScope {
+            val product = async { api.getProductById(productId).product }
+            val locations = async { api.getLocations() }
+            val groups = async { api.getProductGroups() }
+            val products = async { api.getProducts() }
+            Lookups(product.await(), locations.await(), groups.await(), products.await())
+        }
         val needsParent = product.parent_product_id == null && (product.no_own_stock ?: 0) == 0
         val needsShelfLife = isNew || (needsBestBefore && product.default_best_before_days <= 0)
 
         if (!needsParent && !needsPrice && !needsShelfLife) return
 
-        val locations = api.getLocations()
-        val groups = api.getProductGroups()
         val locationIds = locations.associate { it.name.lowercase() to it.id }
         val groupIds = groups.associate { it.name.lowercase() to it.id }
         val wantsPlacement = isNew || needsParent
 
-        val existingParents = if (needsParent) parentNames(api.getProducts()) else emptyList()
+        val existingParents = if (needsParent) parentNames(allProducts) else emptyList()
 
         val prompt = buildPrompt(
             productName = product.name,
@@ -139,7 +157,7 @@ class EnrichmentWorker(context: Context, params: WorkerParameters) : CoroutineWo
         if (needsParent) {
             val parentName = json.optString("name").trim()
             if (parentName.isNotEmpty()) {
-                linkParent(api, product, parentName, locationId ?: product.location_id, groupId)
+                linkParent(api, product, allProducts, parentName, locationId ?: product.location_id, groupId)
             }
         }
 
@@ -161,13 +179,12 @@ class EnrichmentWorker(context: Context, params: WorkerParameters) : CoroutineWo
     private suspend fun linkParent(
         api: GrocyApi,
         child: ProductDetails,
+        allProducts: List<ProductDetails>,
         parentName: String,
         locationId: Int?,
         groupId: Int?
     ) {
-        // Fetched fresh: an earlier job in the queue may have just created this parent.
-        val byName = api.getProducts().associateBy { it.name.lowercase() }
-        var parentId = byName[parentName.lowercase()]?.id
+        var parentId = allProducts.firstOrNull { it.name.equals(parentName, ignoreCase = true) }?.id
 
         if (parentId == null) {
             val payload = mutableMapOf<String, Any>(
