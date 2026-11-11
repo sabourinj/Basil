@@ -37,6 +37,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -130,15 +131,24 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                     vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
                 }
             }
-            is ScannerViewModel.AppState.ShoppingList -> {
-                if (currentState.scanErrorTrigger > 0) {
-                    val pattern = longArrayOf(0, 250, 200, 250, 200, 250, 200, 250, 200, 250)
-                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
-                } else {
-                    vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
-                }
-            }
             else -> {}
+        }
+    }
+
+    // Shopping list haptics fire per scan outcome, not on every list refresh.
+    val shopping = state as? ScannerViewModel.AppState.ShoppingList
+    LaunchedEffect(shopping?.scanErrorTrigger) {
+        if ((shopping?.scanErrorTrigger ?: 0L) > 0L) {
+            val pattern = longArrayOf(0, 250, 200, 250, 200, 250, 200, 250, 200, 250)
+            vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+        }
+    }
+    LaunchedEffect(shopping?.sheet?.id) {
+        val sheet = shopping?.sheet ?: return@LaunchedEffect
+        if (sheet.isDoNotBuy) {
+            vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 250, 200, 250), -1))
+        } else {
+            vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
         }
     }
 
@@ -359,12 +369,28 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                     InventoryResultView(currentState = currentState, viewModel = viewModel)
                 }
                 is ScannerViewModel.AppState.ShoppingList -> {
-                    ShoppingListView(
-                        items = currentState.items,
-                        newlyAddedProductId = currentState.newlyAddedProductId,
-                        scanError = currentState.scanError,
-                        onToggleDone = { item -> viewModel.markItemAsDone(item) }
-                    )
+                    // The purchase sheet floats over the list, so the list stays in view.
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            if (currentState.isProcessing) {
+                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = SuccessGreen)
+                            }
+                            ShoppingListView(
+                                items = currentState.items,
+                                newlyAddedProductId = currentState.newlyAddedProductId,
+                                scanError = currentState.scanError,
+                                onToggleDone = { item -> viewModel.markItemAsDone(item) }
+                            )
+                        }
+                        currentState.sheet?.let { sheet ->
+                            PurchaseSheetCard(
+                                sheet = sheet,
+                                onUndo = { viewModel.undoShoppingPurchase() },
+                                onDismiss = { viewModel.dismissPurchaseSheet(sheet.id) },
+                                modifier = Modifier.align(Alignment.BottomCenter)
+                            )
+                        }
+                    }
                 }
                 is ScannerViewModel.AppState.LinkingChild -> {
                     Text("Linking to: ${currentState.product.name}", style = MaterialTheme.typography.headlineSmall, color = Color.White, textAlign = TextAlign.Center)

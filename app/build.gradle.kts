@@ -68,6 +68,7 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.generativeai)
     implementation(libs.zxing.core)
+    implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.aboutlibraries.compose)
     implementation(libs.aboutlibraries.core)
 

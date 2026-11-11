@@ -38,6 +38,10 @@ import com.basil.grocyscanner.ui.SettingsScreen
 import com.basil.grocyscanner.ui.UnconfiguredScreen
 import com.basil.grocyscanner.ui.theme.DeepPurple
 import com.basil.grocyscanner.viewmodel.ScannerViewModel
+import com.basil.grocyscanner.work.EnrichmentScheduler
+import com.basil.grocyscanner.data.GeminiConfig
+import com.basil.grocyscanner.data.GeminiModels
+import com.basil.grocyscanner.data.SecurePrefs
 import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
@@ -78,6 +82,7 @@ class MainActivity : ComponentActivity() {
                 val currentVm = viewModel
                 var aiEnabledState by remember { mutableStateOf(sharedPrefs.getBoolean("AI_ENABLED", false)) }
                 var resetDurationSeconds by remember { mutableStateOf(sharedPrefs.getInt("RESET_DURATION", 4)) }
+                var geminiModelState by remember { mutableStateOf(GeminiConfig.model(sharedPrefs)) }
 
                 var currentScreen by remember {
                     mutableStateOf(
@@ -180,6 +185,21 @@ class MainActivity : ComponentActivity() {
                                     )
                                 }
                             },
+                            geminiModel = geminiModelState,
+                            onGeminiModelChange = { model ->
+                                geminiModelState = model
+                                sharedPrefs.edit { putString(GeminiConfig.PREF_KEY, model) }
+                                // Rebuild so the scanner's own Gemini calls switch too
+                                initializeApi(
+                                    sharedPrefs.getString("API_URL", "")!!,
+                                    sharedPrefs.getString("API_TOKEN", "")!!,
+                                    if (aiEnabledState) sharedPrefs.getString("GEMINI_KEY", null) else null
+                                )
+                            },
+                            loadGeminiModels = {
+                                val key = sharedPrefs.getString("GEMINI_KEY", null)
+                                if (key.isNullOrBlank()) emptyList() else GeminiModels.fetchFlashModels(key)
+                            },
                             resetDurationSeconds = resetDurationSeconds,
                             onResetDurationChange = { duration ->
                                 resetDurationSeconds = duration
@@ -195,6 +215,7 @@ class MainActivity : ComponentActivity() {
                                 viewModel = null
                                 aiEnabledState = false
                                 resetDurationSeconds = 4
+                                geminiModelState = GeminiConfig.DEFAULT_MODEL
                                 currentScreen = "unconfigured"
                             },
                             onNavigateBack = { currentScreen = "scanner" }
@@ -247,7 +268,12 @@ class MainActivity : ComponentActivity() {
                 Log.e("BasilDebug", "Schema setup failed, but continuing: ${e.message}")
             }
 
-            viewModel = ScannerViewModel(grocyApi, geminiKey)
+            viewModel = ScannerViewModel(
+                grocyApi,
+                geminiKey,
+                EnrichmentScheduler(applicationContext),
+                GeminiConfig.model(SecurePrefs.get(this@MainActivity))
+            )
         }
     }
 
@@ -287,6 +313,21 @@ class MainActivity : ComponentActivity() {
             api.createUserfield(UserfieldCreateRequest(
                 name = "do_not_buy",
                 caption = "Do Not Buy",
+                type = "checkbox",
+                entity = "products",
+                config = null
+            ))
+        }
+
+        // 4. Parent Product flag, set on parents Basil (or the nightly parent script) creates
+        val parentProductExists = existingFields.any {
+            it.name == "parent_product" && it.entity == "products"
+        }
+        if (!parentProductExists) {
+            Log.d("BasilDebug", "Injecting parent_product field...")
+            api.createUserfield(UserfieldCreateRequest(
+                name = "parent_product",
+                caption = "Parent Product",
                 type = "checkbox",
                 entity = "products",
                 config = null

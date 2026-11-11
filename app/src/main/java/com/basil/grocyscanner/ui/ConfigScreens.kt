@@ -2,6 +2,9 @@ package com.basil.grocyscanner.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.text.style.TextOverflow
+import com.basil.grocyscanner.data.GeminiModelOption
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -178,6 +181,9 @@ fun RowScope.ModeButton(title: String, isSelected: Boolean, onClick: () -> Unit)
 fun SettingsScreen(
     isAiEnabled: Boolean,
     onToggleAi: (Boolean) -> Unit,
+    geminiModel: String,
+    onGeminiModelChange: (String) -> Unit,
+    loadGeminiModels: suspend () -> List<GeminiModelOption>,
     resetDurationSeconds: Int,
     onResetDurationChange: (Int) -> Unit,
     viewModel: ScannerViewModel,
@@ -187,6 +193,7 @@ fun SettingsScreen(
 ) {
     var showCreditsDialog by remember { mutableStateOf(false) }
     var showBatchModal by remember { mutableStateOf(false) }
+    var showModelPicker by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
     val locations by viewModel.locations.collectAsState()
 
@@ -232,6 +239,29 @@ fun SettingsScreen(
                     onCheckedChange = { onToggleAi(it) },
                     colors = SwitchDefaults.colors(checkedThumbColor = DeepPurple, checkedTrackColor = Color.LightGray)
                 )
+            }
+
+            if (isAiEnabled) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth(0.8f)
+                        .clickable { showModelPicker = true }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Gemini Model", style = MaterialTheme.typography.titleMedium, color = Color.White)
+                    Text(
+                        text = modelLabel(geminiModel),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = SuccessGreen,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 16.dp)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -311,6 +341,18 @@ fun SettingsScreen(
                 onStartBatchMove(locId, locName)
             },
             onDismiss = { showBatchModal = false }
+        )
+    }
+
+    if (showModelPicker) {
+        GeminiModelPicker(
+            current = geminiModel,
+            loadModels = loadGeminiModels,
+            onSelect = { model ->
+                showModelPicker = false
+                if (model != geminiModel) onGeminiModelChange(model)
+            },
+            onDismiss = { showModelPicker = false }
         )
     }
 
