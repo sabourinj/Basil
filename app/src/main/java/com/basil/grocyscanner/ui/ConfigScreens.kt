@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoveDown
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenuItem
@@ -83,7 +84,7 @@ import com.mikepenz.aboutlibraries.util.withContext
  * step's own content (Grocy or Gemini) centered in the space below it.
  */
 @Composable
-private fun SetupScaffold(content: @Composable ColumnScope.() -> Unit) {
+internal fun SetupScaffold(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -106,7 +107,7 @@ private fun SetupScaffold(content: @Composable ColumnScope.() -> Unit) {
 private val GEMINI_LOGO_SIZE = 80.dp
 
 @Composable
-fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
+fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit, onCameraScan: (() -> Unit)? = null) {
     var step by remember { mutableIntStateOf(1) }
 
     SetupScaffold {
@@ -142,6 +143,7 @@ fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
             Text("API Key Required", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(16.dp))
             Text("1. Create a Gemini API Key.\n2. Generate a QR code for the key.\n3. Scan the QR Code.", textAlign = TextAlign.Left, color = Color.LightGray)
+            onCameraScan?.let { SetupScanButton(it) }
             Spacer(modifier = Modifier.height(48.dp))
             TextButton(onClick = onSkip) { Text("Skip for now", color = Color.LightGray) }
         }
@@ -149,12 +151,24 @@ fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
 }
 
 @Composable
-fun UnconfiguredScreen() {
+fun UnconfiguredScreen(onCameraScan: (() -> Unit)? = null) {
     SetupScaffold {
         Image(painter = painterResource(id = R.drawable.grocy_logo), contentDescription = "Grocy Logo", modifier = Modifier.size(180.dp))
         Text("API Key Required", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(16.dp))
         Text("1. Generate an API Key in Grocy.\n2. Click the Show QR Code button.\n3. Scan the QR code displayed.", textAlign = TextAlign.Left, color = Color.LightGray)
+        onCameraScan?.let { SetupScanButton(it) }
+    }
+}
+
+/** Opens the camera to read a setup QR code; shown only when scanning with the camera. */
+@Composable
+private fun SetupScanButton(onClick: () -> Unit) {
+    Spacer(modifier = Modifier.height(32.dp))
+    Button(onClick = onClick, colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = DeepPurple)) {
+        Icon(imageVector = Icons.Filled.PhotoCamera, contentDescription = null, modifier = Modifier.size(20.dp))
+        Spacer(modifier = Modifier.width(12.dp))
+        Text("Scan QR Code", fontWeight = FontWeight.Bold)
     }
 }
 
@@ -186,6 +200,8 @@ fun SettingsScreen(
     loadGeminiModels: suspend () -> List<GeminiModelOption>,
     resetDurationSeconds: Int,
     onResetDurationChange: (Int) -> Unit,
+    isCameraScanEnabled: Boolean,
+    onToggleCameraScan: ((Boolean) -> Unit)?,
     viewModel: ScannerViewModel,
     onStartBatchMove: (Int, String) -> Unit,
     onLogout: () -> Unit,
@@ -260,6 +276,26 @@ fun SettingsScreen(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(start = 16.dp)
+                    )
+                }
+            }
+
+            // Hidden on devices with no camera at all
+            if (onToggleCameraScan != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(0.8f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Scan with Camera", style = MaterialTheme.typography.titleMedium, color = Color.White)
+                        Text("Off for scanner devices with a built-in reader", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
+                    }
+                    Switch(
+                        checked = isCameraScanEnabled,
+                        onCheckedChange = { onToggleCameraScan(it) },
+                        colors = SwitchDefaults.colors(checkedThumbColor = DeepPurple, checkedTrackColor = Color.LightGray)
                     )
                 }
             }

@@ -30,9 +30,14 @@ import com.basil.grocyscanner.ui.theme.SuccessGreen
 import com.basil.grocyscanner.viewmodel.ScannerViewModel
 
 // Takes the mode buttons' place while shopping: what the last scan is doing,
-// its error if it failed, or just "Shopping Mode". The X leaves shopping mode.
+// its error if it failed, or just "Shopping Mode". The X leaves shopping mode;
+// when scanning with the camera, a camera button sits beside it.
 @Composable
-fun ShoppingStatusBar(state: ScannerViewModel.AppState.ShoppingList, onExit: () -> Unit) {
+fun ShoppingStatusBar(
+    state: ScannerViewModel.AppState.ShoppingList,
+    onExit: () -> Unit,
+    onCameraScan: (() -> Unit)? = null
+) {
     Row(
         // Same height as the mode-button row, so the list doesn't jump
         modifier = Modifier.fillMaxWidth().height(72.dp).padding(start = 20.dp, end = 8.dp),
@@ -67,6 +72,11 @@ fun ShoppingStatusBar(state: ScannerViewModel.AppState.ShoppingList, onExit: () 
                     StatusText("Shopping Mode", Color.White)
                 }
             }
+        }
+        // Scanning with the camera: the scan button sits by the X, under the thumb
+        onCameraScan?.let {
+            CameraScanIconButton(onClick = it)
+            Spacer(modifier = Modifier.width(4.dp))
         }
         IconButton(onClick = onExit) {
             Icon(imageVector = Icons.Filled.Close, contentDescription = "Leave Shopping Mode", tint = Color.LightGray)

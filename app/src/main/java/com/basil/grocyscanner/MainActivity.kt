@@ -34,6 +34,9 @@ import androidx.lifecycle.lifecycleScope
 import com.basil.grocyscanner.data.GrocyApi
 import com.basil.grocyscanner.data.UserfieldCreateRequest
 import com.basil.grocyscanner.ui.AiSetupScreen
+import com.basil.grocyscanner.ui.CameraScanning
+import com.basil.grocyscanner.ui.ScannerChoiceScreen
+import com.basil.grocyscanner.ui.rememberCameraScanner
 import com.basil.grocyscanner.ui.GrocyScannerApp
 import com.basil.grocyscanner.ui.SettingsScreen
 import com.basil.grocyscanner.ui.UnconfiguredScreen
@@ -85,12 +88,66 @@ class MainActivity : ComponentActivity() {
                 var resetDurationSeconds by remember { mutableStateOf(sharedPrefs.getInt("RESET_DURATION", 4)) }
                 var geminiModelState by remember { mutableStateOf(GeminiConfig.model(sharedPrefs)) }
 
+                val hasCamera = remember { CameraScanning.hasCamera(this) }
+                // Installs from before camera scanning have no answer saved and stay on the hardware scanner
+                var cameraScanEnabled by remember { mutableStateOf(hasCamera && sharedPrefs.getBoolean(CameraScanning.PREF_KEY, false)) }
+
                 var currentScreen by remember {
                     mutableStateOf(
-                        if (savedUrl.isNullOrBlank()) "unconfigured"
+                        if (savedUrl.isNullOrBlank()) {
+                            // First run: ask how this device scans, so the setup QR codes can be read
+                            if (hasCamera && !sharedPrefs.contains(CameraScanning.PREF_KEY)) "scanner_choice" else "unconfigured"
+                        }
                         else if (!sharedPrefs.contains("AI_ENABLED")) "ai_setup"
                         else "scanner"
                     )
+                }
+
+                fun chooseScanner(useCamera: Boolean) {
+                    sharedPrefs.edit { putBoolean(CameraScanning.PREF_KEY, useCamera) }
+                    cameraScanEnabled = useCamera
+                    if (currentScreen == "scanner_choice") currentScreen = "unconfigured"
+                }
+
+                // Every scan lands here, from the hardware scanner's broadcast or the camera
+                fun handleScan(scannedText: String, fromHardware: Boolean) {
+                    when (currentScreen) {
+                        "scanner_choice" -> {
+                            // A hardware scan answers the question; if it was the Grocy QR code, use it too
+                            if (fromHardware) {
+                                chooseScanner(useCamera = false)
+                                handleScan(scannedText, fromHardware)
+                            }
+                        }
+                        "unconfigured" -> {
+                            if (scannedText.contains("|")) {
+                                val parts = scannedText.split("|")
+                                if (parts.size >= 2) {
+                                    sharedPrefs.edit {
+                                        putString("API_URL", parts[0])
+                                        putString("API_TOKEN", parts[1])
+                                    }
+                                    currentScreen = "ai_setup"
+                                }
+                            }
+                        }
+                        "ai_setup" -> {
+                            sharedPrefs.edit {
+                                putString("GEMINI_KEY", scannedText)
+                                putBoolean("AI_ENABLED", true)
+                            }
+                            aiEnabledState = true
+                            initializeApi(
+                                sharedPrefs.getString("API_URL", "")!!,
+                                sharedPrefs.getString("API_TOKEN", "")!!,
+                                scannedText
+                            )
+                            currentScreen = "scanner"
+                        }
+                        "scanner" -> {
+                            viewModel?.onBarcodeScanned(scannedText)
+                        }
+                    }
                 }
 
                 Surface(modifier = Modifier.fillMaxSize(), color = DeepPurple, contentColor = Color.White) {
@@ -98,42 +155,16 @@ class MainActivity : ComponentActivity() {
                     val context = LocalContext.current
                     val lifecycleOwner = LocalLifecycleOwner.current
 
+                    // Camera scans feed the same path as the hardware scanner
+                    val startCameraScan = rememberCameraScanner { handleScan(it, fromHardware = false) }
+                    val onCameraScan: (() -> Unit)? = if (cameraScanEnabled) startCameraScan else null
+
                     DisposableEffect(lifecycleOwner, currentScreen) {
                         val receiver = object : BroadcastReceiver() {
                             override fun onReceive(context: Context?, intent: Intent?) {
                                 val scannedText = intent?.getStringExtra("barcode_data")?.trim()
                                 if (scannedText.isNullOrBlank()) return
-
-                                when (currentScreen) {
-                                    "unconfigured" -> {
-                                        if (scannedText.contains("|")) {
-                                            val parts = scannedText.split("|")
-                                            if (parts.size >= 2) {
-                                                sharedPrefs.edit {
-                                                    putString("API_URL", parts[0])
-                                                    putString("API_TOKEN", parts[1])
-                                                }
-                                                currentScreen = "ai_setup"
-                                            }
-                                        }
-                                    }
-                                    "ai_setup" -> {
-                                        sharedPrefs.edit {
-                                            putString("GEMINI_KEY", scannedText)
-                                            putBoolean("AI_ENABLED", true)
-                                        }
-                                        aiEnabledState = true
-                                        initializeApi(
-                                            sharedPrefs.getString("API_URL", "")!!,
-                                            sharedPrefs.getString("API_TOKEN", "")!!,
-                                            scannedText
-                                        )
-                                        currentScreen = "scanner"
-                                    }
-                                    "scanner" -> {
-                                        viewModel?.onBarcodeScanned(scannedText)
-                                    }
-                                }
+                                handleScan(scannedText, fromHardware = true)
                             }
                         }
 
@@ -154,7 +185,8 @@ class MainActivity : ComponentActivity() {
                     }
 
                     when (currentScreen) {
-                        "unconfigured" -> UnconfiguredScreen()
+                        "scanner_choice" -> ScannerChoiceScreen(onChoose = { chooseScanner(it) })
+                        "unconfigured" -> UnconfiguredScreen(onCameraScan = onCameraScan)
                         "ai_setup" -> AiSetupScreen(
                             onEnableAi = {
                                 sharedPrefs.edit { putBoolean("AI_ENABLED", true) }
@@ -165,10 +197,11 @@ class MainActivity : ComponentActivity() {
                                 aiEnabledState = false
                                 initializeApi(sharedPrefs.getString("API_URL", "")!!, sharedPrefs.getString("API_TOKEN", "")!!, null)
                                 currentScreen = "scanner"
-                            }
+                            },
+                            onCameraScan = onCameraScan
                         )
                         "scanner" -> currentVm?.let {
-                            GrocyScannerApp(it, resetDurationSeconds, onNavigateToSettings = { currentScreen = "settings" })
+                            GrocyScannerApp(it, resetDurationSeconds, onNavigateToSettings = { currentScreen = "settings" }, onCameraScan = onCameraScan)
                         }
                         "settings" -> {
                             // Back gesture does what the back arrow does
@@ -209,13 +242,23 @@ class MainActivity : ComponentActivity() {
                                     resetDurationSeconds = duration
                                     sharedPrefs.edit { putInt("RESET_DURATION", duration) }
                                 },
+                                isCameraScanEnabled = cameraScanEnabled,
+                                onToggleCameraScan = if (!hasCamera) null else { enabled ->
+                                    cameraScanEnabled = enabled
+                                    sharedPrefs.edit { putBoolean(CameraScanning.PREF_KEY, enabled) }
+                                },
                                 viewModel = currentVm!!,
                                 onStartBatchMove = { locId, locName ->
                                     currentVm.startBatchMove(locId, locName)
                                     currentScreen = "scanner"
                                 },
                                 onLogout = {
-                                    sharedPrefs.edit { clear() }
+                                    // The scanner choice describes this device, not the account, so it stays
+                                    val cameraChoice = if (sharedPrefs.contains(CameraScanning.PREF_KEY)) cameraScanEnabled else null
+                                    sharedPrefs.edit {
+                                        clear()
+                                        cameraChoice?.let { putBoolean(CameraScanning.PREF_KEY, it) }
+                                    }
                                     viewModel = null
                                     aiEnabledState = false
                                     resetDurationSeconds = 4
