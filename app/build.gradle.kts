@@ -4,10 +4,6 @@ plugins {
     alias(libs.plugins.aboutlibraries)
 }
 
-aboutLibraries {
-    registerAndroidTasks = true
-}
-
 base {
     archivesName.set("basil")
 }
@@ -73,7 +69,6 @@ dependencies {
     implementation(libs.androidx.camera.view)
     implementation(libs.mlkit.barcode.scanning)
     implementation(libs.androidx.work.runtime.ktx)
-    implementation(libs.aboutlibraries.compose)
     implementation(libs.aboutlibraries.core)
 
     // TESTING
