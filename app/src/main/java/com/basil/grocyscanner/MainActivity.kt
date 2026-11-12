@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
@@ -169,57 +170,61 @@ class MainActivity : ComponentActivity() {
                         "scanner" -> currentVm?.let {
                             GrocyScannerApp(it, resetDurationSeconds, onNavigateToSettings = { currentScreen = "settings" })
                         }
-                        "settings" -> SettingsScreen(
-                            isAiEnabled = aiEnabledState,
-                            onToggleAi = { enabled ->
-                                aiEnabledState = enabled
-                                sharedPrefs.edit { putBoolean("AI_ENABLED", enabled) }
-
-                                if (enabled && sharedPrefs.getString("GEMINI_KEY", null).isNullOrBlank()) {
-                                    currentScreen = "ai_setup"
-                                } else {
+                        "settings" -> {
+                            // Back gesture does what the back arrow does
+                            BackHandler { currentScreen = "scanner" }
+                            SettingsScreen(
+                                isAiEnabled = aiEnabledState,
+                                onToggleAi = { enabled ->
+                                    aiEnabledState = enabled
+                                    sharedPrefs.edit { putBoolean("AI_ENABLED", enabled) }
+    
+                                    if (enabled && sharedPrefs.getString("GEMINI_KEY", null).isNullOrBlank()) {
+                                        currentScreen = "ai_setup"
+                                    } else {
+                                        initializeApi(
+                                            sharedPrefs.getString("API_URL", "")!!,
+                                            sharedPrefs.getString("API_TOKEN", "")!!,
+                                            if (enabled) sharedPrefs.getString("GEMINI_KEY", null) else null
+                                        )
+                                    }
+                                },
+                                geminiModel = geminiModelState,
+                                onGeminiModelChange = { model ->
+                                    geminiModelState = model
+                                    sharedPrefs.edit { putString(GeminiConfig.PREF_KEY, model) }
+                                    // Rebuild so the scanner's own Gemini calls switch too
                                     initializeApi(
                                         sharedPrefs.getString("API_URL", "")!!,
                                         sharedPrefs.getString("API_TOKEN", "")!!,
-                                        if (enabled) sharedPrefs.getString("GEMINI_KEY", null) else null
+                                        if (aiEnabledState) sharedPrefs.getString("GEMINI_KEY", null) else null
                                     )
-                                }
-                            },
-                            geminiModel = geminiModelState,
-                            onGeminiModelChange = { model ->
-                                geminiModelState = model
-                                sharedPrefs.edit { putString(GeminiConfig.PREF_KEY, model) }
-                                // Rebuild so the scanner's own Gemini calls switch too
-                                initializeApi(
-                                    sharedPrefs.getString("API_URL", "")!!,
-                                    sharedPrefs.getString("API_TOKEN", "")!!,
-                                    if (aiEnabledState) sharedPrefs.getString("GEMINI_KEY", null) else null
-                                )
-                            },
-                            loadGeminiModels = {
-                                val key = sharedPrefs.getString("GEMINI_KEY", null)
-                                if (key.isNullOrBlank()) emptyList() else GeminiModels.fetchFlashModels(key)
-                            },
-                            resetDurationSeconds = resetDurationSeconds,
-                            onResetDurationChange = { duration ->
-                                resetDurationSeconds = duration
-                                sharedPrefs.edit { putInt("RESET_DURATION", duration) }
-                            },
-                            viewModel = currentVm!!,
-                            onStartBatchMove = { locId, locName ->
-                                currentVm.startBatchMove(locId, locName)
-                                currentScreen = "scanner"
-                            },
-                            onLogout = {
-                                sharedPrefs.edit { clear() }
-                                viewModel = null
-                                aiEnabledState = false
-                                resetDurationSeconds = 4
-                                geminiModelState = GeminiConfig.DEFAULT_MODEL
-                                currentScreen = "unconfigured"
-                            },
-                            onNavigateBack = { currentScreen = "scanner" }
-                        )
+                                },
+                                loadGeminiModels = {
+                                    val key = sharedPrefs.getString("GEMINI_KEY", null)
+                                    if (key.isNullOrBlank()) emptyList() else GeminiModels.fetchFlashModels(key)
+                                },
+                                resetDurationSeconds = resetDurationSeconds,
+                                onResetDurationChange = { duration ->
+                                    resetDurationSeconds = duration
+                                    sharedPrefs.edit { putInt("RESET_DURATION", duration) }
+                                },
+                                viewModel = currentVm!!,
+                                onStartBatchMove = { locId, locName ->
+                                    currentVm.startBatchMove(locId, locName)
+                                    currentScreen = "scanner"
+                                },
+                                onLogout = {
+                                    sharedPrefs.edit { clear() }
+                                    viewModel = null
+                                    aiEnabledState = false
+                                    resetDurationSeconds = 4
+                                    geminiModelState = GeminiConfig.DEFAULT_MODEL
+                                    currentScreen = "unconfigured"
+                                },
+                                onNavigateBack = { currentScreen = "scanner" }
+                            )
+                        }
                     }
                 }
             }

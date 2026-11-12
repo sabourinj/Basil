@@ -1,5 +1,6 @@
 package com.basil.grocyscanner.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -77,6 +78,9 @@ fun PurchaseSheetCard(
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
+        // Same white outline as the Transfer destination dialog, so it stands
+        // apart from the list rows behind it
+        border = BorderStroke(2.dp, Color.White),
         colors = CardDefaults.cardColors(containerColor = DarkerHeaderPurple),
         elevation = CardDefaults.cardElevation(defaultElevation = 12.dp)
     ) {
