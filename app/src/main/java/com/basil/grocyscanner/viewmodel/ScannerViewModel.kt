@@ -6,8 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.basil.grocyscanner.data.*
 import com.basil.grocyscanner.work.EnrichmentRequest
 import com.basil.grocyscanner.work.EnrichmentScheduler
-import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.generationConfig
+import com.basil.grocyscanner.work.EnrichmentWorker
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.async
@@ -20,7 +19,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 import retrofit2.HttpException
 import java.io.IOException
 import java.time.LocalDate
@@ -190,18 +188,6 @@ class ScannerViewModel(
         fun isRejectedScan(barcode: String) = REJECT_PATTERNS.any { it.containsMatchIn(barcode) }
     }
 
-    private val generativeModel by lazy {
-        geminiApiKey?.let {
-            GenerativeModel(
-                modelName = geminiModelName,
-                apiKey = it,
-                generationConfig = generationConfig {
-                    responseMimeType = "application/json"
-                    temperature = 0.0f
-                }
-            )
-        }
-    }
 
     init {
         viewModelScope.launch {
@@ -791,8 +777,9 @@ class ScannerViewModel(
             val response = api.getProductByBarcode(barcode)
             currentProduct = response.product
             knownPrice = response.last_price ?: response.product.default_price
-            
-            val bDetails = fetchBarcodeDetails(barcode)
+
+            // Grocy usually includes the barcode row; only look it up separately if not
+            val bDetails = if (response.barcode?.id == null || response.barcode.amount == null) fetchBarcodeDetails(barcode) else null
             scanAmount = response.barcode?.amount ?: bDetails?.amount ?: 1.0
             barcodeId = response.barcode?.id ?: bDetails?.id
         } catch (e: HttpException) {
@@ -840,19 +827,17 @@ class ScannerViewModel(
         }
 
         currentProduct?.let { product ->
-            if (isNewlyAdded && generativeModel != null) {
+            if (isNewlyAdded && geminiApiKey != null) {
                 _state.value = AppState.Loading("Analyzing product...", showGemini = true)
-                enrichProductWithGemini(product.id, product.name)
+                estimateNewProductDetails(product)
 
-                try {
-                    _state.value = AppState.Loading("Creating new product...", showGrocy = true)
-                    val updatedResponse = api.getProductByBarcode(barcode)
-                    val bDetails = fetchBarcodeDetails(barcode)
-                    processFoundProduct(updatedResponse.product, knownPrice, updatedResponse.barcode?.amount ?: bDetails?.amount ?: 1.0, updatedResponse.barcode?.id ?: bDetails?.id, barcode)
+                // Re-read it so the group (and so the date rule) and shelf life apply
+                val updated = try {
+                    api.getProductById(product.id).product
                 } catch (e: Exception) {
-                    processFoundProduct(product, knownPrice, scanAmount, barcodeId, barcode)
+                    product
                 }
-
+                processFoundProduct(updated, knownPrice, scanAmount, barcodeId, barcode)
             } else {
                 processFoundProduct(product, knownPrice, scanAmount, barcodeId, barcode)
             }
@@ -883,46 +868,75 @@ class ScannerViewModel(
         }
     }
 
-    private suspend fun enrichProductWithGemini(productId: Int, name: String) {
+    // A product just created from this scan has no group yet, and the group
+    // decides whether the user must enter a date. So its group, location and
+    // shelf life are worked out now, while the user waits. Price and parent
+    // still go to the background job.
+    private suspend fun estimateNewProductDetails(product: ProductDetails) {
+        val key = geminiApiKey ?: return
         try {
-            val locationList = _locations.value.joinToString { "${it.id}: ${it.name}" }
-            val groupList = cachedGroups.joinToString { "${it.id}: ${it.name}" }
-
-            val prompt = """
-                Analyze the grocery product: "$name".
-                Available Locations: [$locationList]
-                Available Product Groups: [$groupList]
-                
-                Return a strict JSON object with these EXACT keys based on your best estimates:
-                - "default_best_before_days" (int)
-                - "default_best_before_days_after_open" (int)
-                - "default_best_before_days_after_freezing" (int)
-                - "default_best_before_days_after_thawing" (int)
-                - "should_not_be_frozen" (int, 1 for yes, 0 for no)
-                - "product_group_id" (int, choose best match from available groups or null if none fit)
-                - "location_id" (int, choose best match from available locations or null if none fit)
-            """.trimIndent()
-
-            val response = generativeModel?.generateContent(prompt)
-            response?.text?.let { jsonStr ->
-                val json = JSONObject(jsonStr)
-                val updateMap = mutableMapOf<String, Any>()
-
-                updateMap["default_best_before_days"] = json.optInt("default_best_before_days", 0)
-                updateMap["default_best_before_days_after_open"] = json.optInt("default_best_before_days_after_open", 0)
-                updateMap["default_best_before_days_after_freezing"] = json.optInt("default_best_before_days_after_freezing", 0)
-                updateMap["default_best_before_days_after_thawing"] = json.optInt("default_best_before_days_after_thawing", 0)
-                updateMap["should_not_be_frozen"] = json.optInt("should_not_be_frozen", 0)
-
-                if (json.has("product_group_id") && !json.isNull("product_group_id")) updateMap["product_group_id"] = json.getInt("product_group_id")
-                if (json.has("location_id") && !json.isNull("location_id")) updateMap["location_id"] = json.getInt("location_id")
-
-                api.updateProduct(productId, updateMap)
-            }
+            val locations = _locations.value.ifEmpty { api.getLocations() }
+            val groups = cachedGroups.ifEmpty { api.getProductGroups().also { cachedGroups = it } }
+            val prompt = EnrichmentWorker.buildPrompt(
+                productName = product.name,
+                parent = false,
+                placement = true,
+                shelfLife = true,
+                price = false,
+                locationNames = locations.map { it.name },
+                groupNames = groups.map { it.name },
+                existingParents = emptyList()
+            )
+            val json = EnrichmentWorker.askGemini(key, geminiModelName, prompt)
+            val locationId = locations.find { it.name.equals(json.optString("location"), ignoreCase = true) }?.id
+            val groupId = groups.find { it.name.equals(json.optString("group"), ignoreCase = true) }?.id
+            api.updateProduct(product.id, EnrichmentWorker.productDetailsUpdate(json, locationId, groupId))
         } catch (e: Exception) {
             Log.e("BasilDebug", "AI Enrichment Failed: ${e.message}")
         }
     }
+
+    // Shelf life only, for an auto-printed label that needs a date right now
+    private suspend fun estimateShelfLifeDays(product: ProductDetails): Int? {
+        val key = geminiApiKey ?: return null
+        return try {
+            val prompt = EnrichmentWorker.buildPrompt(
+                productName = product.name, parent = false, placement = false, shelfLife = true, price = false,
+                locationNames = emptyList(), groupNames = emptyList(), existingParents = emptyList()
+            )
+            EnrichmentWorker.askGemini(key, geminiModelName, prompt).optInt("default_best_before_days", 0).takeIf { it > 0 }
+        } catch (e: Exception) {
+            Log.e("BasilDebug", "Shelf life estimate failed: ${e.message}")
+            null
+        }
+    }
+
+    private suspend fun isAutoPrint(barcodeId: Int?): Boolean {
+        if (barcodeId == null) return false
+        return try {
+            (api.getBarcodeUserfields(barcodeId)["auto_print_label"]?.toString() ?: "0") == "1"
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    // Hands what a Purchase-mode scan skipped to the same background job
+    // shopping mode uses: the price, a date the purchase was booked without,
+    // and the parent product.
+    private fun queuePurchaseEnrichment(product: ProductDetails, price: Double?, expireDate: String?, stockId: String?) {
+        val scheduler = enrichment ?: return
+        if (geminiApiKey == null) return
+        val strategy = expirationStrategy(product)
+        val needsPrice = price == null || price <= 0.0
+        val needsBestBefore = expireDate == null && strategy.isNotEmpty() && strategy != "not_required"
+        val needsParent = product.parent_product_id == null && (product.no_own_stock ?: 0) == 0
+        if (needsPrice || needsBestBefore || needsParent) {
+            scheduler.enqueue(EnrichmentRequest(product.id, isNewProduct = false, needsPrice, needsBestBefore, stockId))
+        }
+    }
+
+    private fun expirationStrategy(product: ProductDetails): String =
+        cachedGroups.find { it.id == product.product_group_id }?.userfields?.expiration_strategy ?: "ai_estimate"
 
     private suspend fun processFoundProduct(product: ProductDetails, knownPrice: Double? = null, amount: Double = 1.0, barcodeId: Int? = null, scannedBarcode: String? = null) {
         when (_currentMode.value) {
@@ -952,14 +966,13 @@ class ScannerViewModel(
             }
             AppMode.CONSUME -> confirmAction(product.id, amount, null, null)
             AppMode.PURCHASE -> {
-                if (isDoNotBuy(product.id)) {
-                    var autoPrint = false
-                    if (barcodeId != null) {
-                        try {
-                            val uf = api.getBarcodeUserfields(barcodeId)
-                            autoPrint = (uf["auto_print_label"]?.toString() ?: "0") == "1"
-                        } catch (_: Exception) {}
-                    }
+                // Both lookups at once rather than one after the other
+                val (doNotBuy, autoPrint) = coroutineScope {
+                    val dnb = async { isDoNotBuy(product.id) }
+                    val ap = async { isAutoPrint(barcodeId) }
+                    dnb.await() to ap.await()
+                }
+                if (doNotBuy) {
                     _state.value = AppState.DoNotBuyWarning(
                         product = product,
                         estimatedPrice = knownPrice,
@@ -969,15 +982,6 @@ class ScannerViewModel(
                     )
                     return
                 }
-
-                var autoPrint = false
-                if (barcodeId != null) {
-                    try {
-                        val uf = api.getBarcodeUserfields(barcodeId)
-                        autoPrint = (uf["auto_print_label"]?.toString() ?: "0") == "1"
-                    } catch (_: Exception) {}
-                }
-
                 continuePurchaseProcessing(product, knownPrice, amount, autoPrint, scannedBarcode)
             }
             AppMode.BATCH_MOVE -> {
@@ -992,40 +996,30 @@ class ScannerViewModel(
         }
     }
 
+    // Only what has to be settled at scan time happens here: whether the user
+    // must enter a date, and the date a label printed right now needs. The
+    // price is never waited on; the background job fills it in afterwards.
     private suspend fun continuePurchaseProcessing(product: ProductDetails, knownPrice: Double? = null, amount: Double = 1.0, autoPrint: Boolean = false, scannedBarcode: String? = null) {
-        var estimatedPrice: Double? = knownPrice
-
-        if (estimatedPrice == null || estimatedPrice <= 0.0) {
-            if (generativeModel != null) {
-                _state.value = AppState.Loading("Estimating price...", showGemini = true)
-                try {
-                    val pricePrompt = "Estimate the current USD price of '${product.name}'. Return a JSON object with a single key 'price' containing a float value."
-                    val response = generativeModel?.generateContent(pricePrompt)
-                    response?.text?.let { jsonStr ->
-                        estimatedPrice = JSONObject(jsonStr).optDouble("price", 0.0).takeIf { it > 0.0 }
-                    }
-                } catch (e: Exception) {
-                    Log.e("BasilDebug", "Price estimation failed: ${e.message}")
-                }
-            }
-        }
-
-        val productGroup = cachedGroups.find { it.id == product.product_group_id }
-        val strategy = productGroup?.userfields?.expiration_strategy ?: "ai_estimate"
+        val price = knownPrice?.takeIf { it > 0.0 }
         val shelfLife = product.default_best_before_days
 
-        when (strategy) {
+        when (expirationStrategy(product)) {
             "user_entry" -> {
-                _state.value = AppState.NeedsDate(product, estimatedPrice, amount, autoPrint)
+                _state.value = AppState.NeedsDate(product, price, amount, autoPrint)
             }
             "ai_estimate" -> {
-                val daysToAdd = shelfLife.toLong()
-                val autoCalculatedDate = LocalDate.now().plusDays(daysToAdd).format(
-                    DateTimeFormatter.ISO_LOCAL_DATE)
-                confirmAction(product.id, amount, autoCalculatedDate, estimatedPrice, autoPrint, scannedBarcode)
+                var days: Int? = shelfLife.takeIf { it > 0 }
+                if (days == null && autoPrint && geminiApiKey != null) {
+                    // The label goes out now, so its date can't wait for the background job.
+                    _state.value = AppState.Loading("Estimating shelf life...", showGemini = true)
+                    days = estimateShelfLifeDays(product)
+                }
+                // No shelf life yet: book without a date and let the background job set it
+                val date = days?.let { LocalDate.now().plusDays(it.toLong()).format(DateTimeFormatter.ISO_LOCAL_DATE) }
+                confirmAction(product.id, amount, date, price, autoPrint, scannedBarcode)
             }
             "not_required", "" -> {
-                confirmAction(product.id, amount, null, estimatedPrice, autoPrint, scannedBarcode)
+                confirmAction(product.id, amount, null, price, autoPrint, scannedBarcode)
             }
         }
     }
@@ -1053,6 +1047,10 @@ class ScannerViewModel(
                 val remaining = updatedData.stock_amount ?: 0.0
                 val stockStr = if (remaining % 1.0 == 0.0) remaining.toInt().toString() else remaining.toString()
                 val parentStock = fetchParentStock(updatedData.product, remaining)
+
+                if (_currentMode.value == AppMode.PURCHASE) {
+                    queuePurchaseEnrichment(updatedData.product, price, expireDate, lastStockUuid)
+                }
 
                 _state.value = AppState.Success(
                     message = "Success!",
