@@ -255,11 +255,6 @@ class MainActivity : ComponentActivity() {
                                     resetDurationSeconds = duration
                                     sharedPrefs.edit { putInt("RESET_DURATION", duration) }
                                 },
-                                isCameraScanEnabled = cameraScanEnabled,
-                                onToggleCameraScan = if (!hasCamera) null else { enabled ->
-                                    cameraScanEnabled = enabled
-                                    sharedPrefs.edit { putBoolean(CameraScanning.PREF_KEY, enabled) }
-                                },
                                 viewModel = currentVm!!,
                                 onStartBatchMove = { locId, locName ->
                                     currentVm.startBatchMove(locId, locName)

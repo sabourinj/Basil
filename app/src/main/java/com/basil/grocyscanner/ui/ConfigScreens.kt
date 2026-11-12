@@ -220,8 +220,6 @@ fun SettingsScreen(
     loadGeminiModels: suspend () -> List<GeminiModelOption>,
     resetDurationSeconds: Int,
     onResetDurationChange: (Int) -> Unit,
-    isCameraScanEnabled: Boolean,
-    onToggleCameraScan: ((Boolean) -> Unit)?,
     viewModel: ScannerViewModel,
     onStartBatchMove: (Int, String) -> Unit,
     onLogout: () -> Unit,
@@ -296,26 +294,6 @@ fun SettingsScreen(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(start = 16.dp)
-                    )
-                }
-            }
-
-            // Hidden on devices with no camera at all
-            if (onToggleCameraScan != null) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(0.8f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Scan with Camera", style = MaterialTheme.typography.titleMedium, color = Color.White)
-                        Text("Off for scanner devices with a built-in reader", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
-                    }
-                    Switch(
-                        checked = isCameraScanEnabled,
-                        onCheckedChange = { onToggleCameraScan(it) },
-                        colors = SwitchDefaults.colors(checkedThumbColor = DeepPurple, checkedTrackColor = Color.LightGray)
                     )
                 }
             }

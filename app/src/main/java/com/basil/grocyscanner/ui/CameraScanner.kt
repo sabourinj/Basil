@@ -89,7 +89,7 @@ import kotlin.math.hypot
 
 /**
  * Whether this device scans with its camera instead of a hardware scanner.
- * Asked once on first run; changeable in Settings. Installs from before camera
+ * Asked on first run, and again after Logout / Disconnect in Settings. Installs from before camera
  * support have no answer saved, and keep using the hardware scanner.
  */
 object CameraScanning {
@@ -432,7 +432,7 @@ fun ScannerChoiceScreen(onChoose: (useCamera: Boolean) -> Unit) {
         Text("How will you scan?", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(16.dp))
         Text(
-            "Basil works with a scanner device's built-in barcode reader, or with this phone's camera. You can change this later in Settings.",
+            "Basil works with a scanner device's built-in barcode reader, or with this phone's camera. To change this later, use Logout / Disconnect in Settings.",
             textAlign = TextAlign.Center,
             color = Color.LightGray
         )
