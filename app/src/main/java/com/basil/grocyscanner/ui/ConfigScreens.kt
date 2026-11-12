@@ -6,6 +6,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.ui.text.style.TextOverflow
 import com.basil.grocyscanner.data.GeminiModelOption
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -81,26 +85,32 @@ import com.mikepenz.aboutlibraries.util.withContext
 
 /**
  * First-run setup layout: the Basil logo and name across the top, with the
- * step's own content (Grocy or Gemini) centered in the space below it.
+ * step's own content (scanner choice, Grocy or Gemini) centered in the space
+ * below it.
  */
 @Composable
 internal fun SetupScaffold(content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Spacer(modifier = Modifier.height(24.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(text = "Basil", style = MaterialTheme.typography.headlineLarge, color = Color.White, fontWeight = FontWeight.Bold)
-            Image(painter = painterResource(id = R.drawable.basil_logo), contentDescription = "Basil Logo", modifier = Modifier.size(56.dp))
-        }
-
+    // Basil draws edge to edge, so keep clear of the status bar and any camera cutout
+    BoxWithConstraints(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+        // Taller screens get more room above the logo; short ones keep the minimum
+        val topGap = (maxHeight * 0.08f).coerceIn(24.dp, 96.dp)
         Column(
-            modifier = Modifier.fillMaxWidth().weight(1f),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            content = content
-        )
+            modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp).padding(bottom = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(modifier = Modifier.height(topGap))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(text = "Basil", style = MaterialTheme.typography.headlineLarge, color = Color.White, fontWeight = FontWeight.Bold)
+                Image(painter = painterResource(id = R.drawable.basil_logo), contentDescription = "Basil Logo", modifier = Modifier.size(56.dp))
+            }
+
+            Column(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                content = content
+            )
+        }
     }
 }
 
