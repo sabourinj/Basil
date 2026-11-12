@@ -49,6 +49,17 @@ interface GrocyApi {
     @GET("objects/products")
     suspend fun getProducts(): List<ProductDetails>
 
+    @POST("objects/products")
+    suspend fun createProduct(@Body productData: @JvmSuppressWildcards Map<String, Any>): CreatedObjectResponse
+
+    // Every product that currently has stock
+    @GET("stock")
+    suspend fun getCurrentStock(): List<CurrentStock>
+
+    // Grocy replaces the whole entry, so send every field, not just the changed ones
+    @PUT("stock/entry/{entryId}")
+    suspend fun updateStockEntry(@Path("entryId") entryId: Int, @Body data: @JvmSuppressWildcards Map<String, Any>)
+
     @GET("objects/shopping_locations")
     suspend fun getShoppingLocations(): List<ShoppingLocation>
 

@@ -16,7 +16,9 @@ object NetworkClient {
         if (!safeUrl.endsWith("api/")) safeUrl += "api/"
 
         val logging = HttpLoggingInterceptor { Log.d("GrocyNetwork", it) }
-        logging.level = HttpLoggingInterceptor.Level.BODY
+        // Request lines only: the background jobs pull the whole product list,
+        // and logging every body of it slowed them down.
+        logging.level = HttpLoggingInterceptor.Level.BASIC
 
         val okHttpClient = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)

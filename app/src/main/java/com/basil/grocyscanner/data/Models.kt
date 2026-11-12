@@ -26,7 +26,27 @@ data class ProductDetails(
     val stock_amount: Double? = null,
     val picture_file_name: String? = null,
     val is_parent: Int? = 0,
-    val parent_product_id: Int? = null
+    val parent_product_id: Int? = null,
+    val no_own_stock: Int? = 0,
+    val qu_id_purchase: Int? = null,
+    val qu_id_stock: Int? = null,
+    val qu_factor_purchase_to_stock: Double? = null
+)
+
+// One row of GET /stock: a product that currently has stock
+data class CurrentStock(
+    val product_id: Int,
+    val amount: Double = 0.0
+)
+
+// A sibling under the same parent, for the shopping purchase sheet
+data class SiblingStock(
+    val name: String,
+    val amount: Double
+)
+
+data class CreatedObjectResponse(
+    val created_object_id: Int? = null
 )
 
 data class BarcodeDetails(
@@ -123,5 +143,10 @@ data class StockEntry(
     val amount: Double,
     val best_before_date: String? = null,
     val open: Int = 0,
-    val location_id: Int? = null
+    val location_id: Int? = null,
+    val stock_id: String? = null,
+    val purchased_date: String? = null,
+    val price: Double? = null,
+    val shopping_location_id: Int? = null,
+    val note: String? = null
 )

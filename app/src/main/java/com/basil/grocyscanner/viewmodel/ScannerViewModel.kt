@@ -4,9 +4,17 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.basil.grocyscanner.data.*
+import com.basil.grocyscanner.work.EnrichmentRequest
+import com.basil.grocyscanner.work.EnrichmentScheduler
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.generationConfig
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.UUID
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -25,7 +33,34 @@ enum class AppMode { PURCHASE, CONSUME, INVENTORY, BATCH_MOVE }
 // to tune the sounds out (the same call basil-capture makes).
 enum class ScanSound { ERROR, SERVER_ERROR, PRINTED, UNDONE }
 
-class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: String?) : ViewModel() {
+// What a shopping-mode purchase did to the shopping list
+enum class ListStatus { CHECKED_OFF, REDUCED, NOT_ON_LIST }
+
+data class PurchaseSheet(
+    // Distinguishes one purchase's sheet from the next, even for the same product
+    val id: Long,
+    val product: ProductDetails,
+    val amount: Double,
+    val newStock: Double,
+    val listStatus: ListStatus,
+    val remainingOnList: Double = 0.0,
+    val isDoNotBuy: Boolean = false,
+    val isNewProduct: Boolean = false,
+    val parentName: String? = null,
+    val siblings: List<SiblingStock> = emptyList(),
+    // The background job is still working out the parent
+    val siblingsPending: Boolean = false,
+    val canUndo: Boolean = false,
+    val isUndoing: Boolean = false,
+    val isUndone: Boolean = false
+)
+
+class ScannerViewModel(
+    private val api: GrocyApi,
+    private val geminiApiKey: String?,
+    private val enrichment: EnrichmentScheduler? = null,
+    private val geminiModelName: String = GeminiConfig.DEFAULT_MODEL
+) : ViewModel() {
     private val categoriesRequiringDate = listOf(3, 5, 8)
     private var cachedGroups = listOf<GrocyProductGroup>()
     private var isProcessingAction = false
@@ -47,8 +82,18 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         data class ShoppingList(
             val items: List<ShoppingListItem>,
             val scanErrorTrigger: Long = 0L,
+            // List row to scroll to and pulse (the one a scan just checked off)
             val newlyAddedProductId: Int? = null,
-            val scanError: String? = null
+            val scanError: String? = null,
+            // A scan is being purchased (or added, per processingLabel)
+            val isProcessing: Boolean = false,
+            val processingLabel: String? = null,
+            // Pop-up confirming the last purchase, shown over the list
+            val sheet: PurchaseSheet? = null,
+            // The "+" is armed: the next scan goes on the list instead of being bought
+            val addNextScan: Boolean = false,
+            // Brief confirmation for the status bar, e.g. "Added to list: Ketchup"
+            val notice: String? = null
         ) : AppState()
         data class NeedsDate(
             val product: ProductDetails,
@@ -148,7 +193,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
     private val generativeModel by lazy {
         geminiApiKey?.let {
             GenerativeModel(
-                modelName = "gemini-2.5-flash-lite",
+                modelName = geminiModelName,
                 apiKey = it,
                 generationConfig = generationConfig {
                     responseMimeType = "application/json"
@@ -194,28 +239,34 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         }
     }
 
+    // Names, pictures and categories for the list rows, sorted for display
+    private fun enrichListItems(items: List<ShoppingListItem>, allProducts: List<ProductDetails>): List<ShoppingListItem> {
+        val productsById = allProducts.associateBy { it.id }
+        return items.map { item ->
+            val product = productsById[item.product_id]
+            val group = cachedGroups.find { it.id == product?.product_group_id }
+
+            item.copy(
+                product_name = product?.name ?: item.product_name,
+                product_picture_file_name = product?.picture_file_name ?: item.product_picture_file_name,
+                category_name = group?.name ?: "Uncategorized"
+            )
+        }.sortedWith(compareBy({ it.category_name }, { if (isItemDone(it)) 1 else 0 }, { it.product_name ?: it.note }))
+    }
+
+    private fun isItemDone(item: ShoppingListItem): Boolean {
+        val d = item.done
+        return if (d is Boolean) d
+        else if (d is String) d == "1"
+        else (d as? Number)?.toInt() == 1
+    }
+
     private suspend fun fetchShoppingList() {
         try {
-            val items = api.getShoppingList()
-            val allProducts = api.getProducts()
-            
-            val enrichedItems = items.map { item ->
-                val product = allProducts.find { it.id == item.product_id }
-                val group = cachedGroups.find { it.id == product?.product_group_id }
-                
-                item.copy(
-                    product_name = product?.name ?: item.product_name,
-                    product_picture_file_name = product?.picture_file_name ?: item.product_picture_file_name,
-                    category_name = group?.name ?: "Uncategorized"
-                )
-            }.sortedWith(compareBy({ it.category_name }, { 
-                val d = it.done
-                if (d is Boolean) if (d) 1 else 0
-                else if (d is String) d.toIntOrNull() ?: 0
-                else (d as? Number)?.toInt() ?: 0
-            }, { it.product_name ?: it.note }))
-
-            _state.value = AppState.ShoppingList(enrichedItems)
+            val items = enrichListItems(api.getShoppingList(), api.getProducts())
+            // Keep an open purchase sheet across a refresh (e.g. a row tapped meanwhile)
+            val sheet = (_state.value as? AppState.ShoppingList)?.sheet
+            _state.value = AppState.ShoppingList(items, sheet = sheet, addNextScan = armedForAdd())
         } catch (e: Exception) {
             Log.e("BasilDebug", "Failed to fetch shopping list", e)
             showError("Failed to fetch shopping list", e)
@@ -225,17 +276,310 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
     fun markItemAsDone(item: ShoppingListItem) {
         viewModelScope.launch {
             try {
-                val currentDone = item.done
-                val isDone = if (currentDone is Boolean) currentDone 
-                             else if (currentDone is String) currentDone == "1"
-                             else (currentDone as? Number)?.toInt() == 1
-                
-                val newDone = if (isDone) 0 else 1
+                val newDone = if (isItemDone(item)) 0 else 1
                 api.updateShoppingListItem(item.id, mapOf("done" to newDone))
                 fetchShoppingList() // Refresh
             } catch (e: Exception) {
                 Log.e("BasilDebug", "Failed to update item", e)
             }
+        }
+    }
+
+    // ---- Shopping mode: a scan on the list purchases the item ----
+
+    // What Undo needs to put back for the purchase the open sheet shows
+    private data class ShoppingPurchase(
+        val sheetId: Long,
+        val transactionId: String,
+        val stockId: String?,
+        // The list row as it was before the scan changed it
+        val listItemBefore: ShoppingListItem?
+    )
+
+    private var lastShoppingPurchase: ShoppingPurchase? = null
+    private val shoppingMutex = Mutex()
+
+    // Looks a shopping scan up in Grocy. A barcode Grocy doesn't know is created
+    // from OpenFoodFacts right here; Gemini fills in the rest later. Returns
+    // null (after flagging the error) when nobody recognizes it.
+    private suspend fun identifyShoppingScan(barcode: String, rearmAddOnFail: Boolean): Pair<ProductResponse, Boolean>? {
+        return try {
+            api.getProductByBarcode(barcode) to false
+        } catch (e: HttpException) {
+            if (e.code() != 400) throw e
+            try {
+                api.externalBarcodeLookup(barcode, true)
+            } catch (ex: Exception) {
+                Log.w("BasilDebug", "External lookup failed: ${ex.message}")
+            }
+            try {
+                api.getProductByBarcode(barcode) to true
+            } catch (e2: HttpException) {
+                if (e2.code() == 400) {
+                    flagShoppingScanError("Barcode not recognized", null, rearmAddOnFail)
+                    return null
+                }
+                throw e2
+            }
+        }
+    }
+
+    // The "+" in the toolbar: the next scan goes on the list instead of being bought
+    fun toggleAddNextScanToList() {
+        val state = _state.value as? AppState.ShoppingList ?: return
+        _state.value = state.copy(addNextScan = !state.addNextScan)
+    }
+
+    private suspend fun addScanToShoppingList(barcode: String) {
+        (_state.value as? AppState.ShoppingList)?.let { _state.value = it.copy(isProcessing = true, processingLabel = "Adding to list…") }
+        try {
+            val (response, _) = identifyShoppingScan(barcode, rearmAddOnFail = true) ?: return
+            val product = response.product
+            api.addToShoppingList(AddToShoppingListRequest(product_id = product.id, amount = 1))
+            // Grocy adds to an existing row for the product. If that row was
+            // already checked off, it's needed again, so un-gray it.
+            api.getShoppingList()
+                .filter { it.product_id == product.id && isItemDone(it) }
+                .forEach { api.updateShoppingListItem(it.id, mapOf("done" to 0)) }
+
+            val items = enrichListItems(api.getShoppingList(), api.getProducts())
+            val current = _state.value as? AppState.ShoppingList
+            _state.value = AppState.ShoppingList(
+                items = items,
+                newlyAddedProductId = product.id,
+                sheet = current?.sheet,
+                notice = "Added to list: ${product.name}",
+                addNextScan = armedForAdd()
+            )
+        } catch (e: HttpException) {
+            flagShoppingScanError("HTTP ${e.code()}: Couldn't add to list", e, rearmAdd = true)
+        } catch (e: Exception) {
+            Log.e("BasilDebug", "Add to shopping list failed", e)
+            flagShoppingScanError("Connection Error: Couldn't add to list", e, rearmAdd = true)
+        }
+    }
+
+    fun clearShoppingNotice(notice: String) {
+        val state = _state.value as? AppState.ShoppingList ?: return
+        if (state.notice == notice) _state.value = state.copy(notice = null)
+    }
+
+    private suspend fun purchaseFromShoppingList(barcode: String) {
+        (_state.value as? AppState.ShoppingList)?.let { _state.value = it.copy(isProcessing = true, processingLabel = null) }
+        try {
+            // 1. Identify
+            val (response, isNew) = identifyShoppingScan(barcode, rearmAddOnFail = false) ?: return
+            val product = response.product
+            val amount = response.barcode?.amount ?: fetchBarcodeDetails(barcode)?.amount ?: 1.0
+            val doNotBuy = isDoNotBuy(product.id)
+
+            // 2. Purchase with what's known now. No waiting on Gemini for a
+            // price, and no date prompt: the background job fills both in.
+            val knownPrice = (response.last_price ?: product.default_price)?.takeIf { it > 0.0 }
+            val strategy = cachedGroups.find { it.id == product.product_group_id }?.userfields?.expiration_strategy ?: "ai_estimate"
+            val tracksExpiry = strategy.isNotEmpty() && strategy != "not_required"
+            val shelfLife = product.default_best_before_days
+            val bestBefore = if (tracksExpiry && !isNew && shelfLife > 0) {
+                LocalDate.now().plusDays(shelfLife.toLong()).format(DateTimeFormatter.ISO_LOCAL_DATE)
+            } else null
+            val needsBestBefore = tracksExpiry && bestBefore == null
+
+            val log = api.addStock(product.id, AddStockRequest(amount, knownPrice, bestBefore))
+            val stockId = log.firstOrNull()?.stock_id
+            val transactionId = log.firstNotNullOfOrNull { it.transaction_id }
+
+            // 3. Check it off the list: the product's own row, else its parent's
+            // (a list entry for "Ketchup" is covered by any ketchup).
+            val listBefore = api.getShoppingList()
+            val match = listBefore.firstOrNull { it.product_id == product.id && !isItemDone(it) }
+                ?: product.parent_product_id?.let { parentId ->
+                    listBefore.firstOrNull { it.product_id == parentId && !isItemDone(it) }
+                }
+            var listStatus = ListStatus.NOT_ON_LIST
+            var remaining = 0.0
+            if (match != null) {
+                val left = match.amount - amount
+                if (left > 0.0001) {
+                    api.updateShoppingListItem(match.id, mapOf("amount" to left))
+                    listStatus = ListStatus.REDUCED
+                    remaining = left
+                } else {
+                    api.updateShoppingListItem(match.id, mapOf("done" to 1))
+                    listStatus = ListStatus.CHECKED_OFF
+                }
+            }
+
+            // 4. Hand the rest to the background job
+            val needsPrice = knownPrice == null
+            val needsParent = product.parent_product_id == null && (product.no_own_stock ?: 0) == 0
+            var workId: UUID? = null
+            if (enrichment != null && geminiApiKey != null && (isNew || needsPrice || needsBestBefore || needsParent)) {
+                workId = enrichment.enqueue(EnrichmentRequest(product.id, isNew, needsPrice, needsBestBefore, stockId))
+            }
+
+            // 5. Show it
+            val allProducts = api.getProducts()
+            val items = enrichListItems(api.getShoppingList(), allProducts)
+            val newStock = api.getProductById(product.id).stock_amount ?: 0.0
+            val (parentName, siblings) = loadSiblings(product, allProducts)
+
+            val sheetId = System.nanoTime()
+            lastShoppingPurchase = transactionId?.let { ShoppingPurchase(sheetId, it, stockId, match) }
+            val sheet = PurchaseSheet(
+                id = sheetId,
+                product = product,
+                amount = amount,
+                newStock = newStock,
+                listStatus = listStatus,
+                remainingOnList = remaining,
+                isDoNotBuy = doNotBuy,
+                isNewProduct = isNew,
+                parentName = parentName,
+                siblings = siblings,
+                siblingsPending = workId != null && needsParent,
+                canUndo = transactionId != null
+            )
+            _state.value = AppState.ShoppingList(items = items, newlyAddedProductId = match?.product_id, sheet = sheet, addNextScan = armedForAdd())
+            if (doNotBuy) playSound(ScanSound.ERROR)
+
+            if (workId != null && needsParent) watchEnrichment(workId, sheetId, product.id)
+        } catch (e: HttpException) {
+            flagShoppingScanError("HTTP ${e.code()}: Purchase failed", e)
+        } catch (e: Exception) {
+            Log.e("BasilDebug", "Shopping purchase failed", e)
+            flagShoppingScanError("Connection Error: Purchase failed", e)
+        }
+    }
+
+    // Whether the "+" is armed right now (it can be tapped while a scan is processing)
+    private fun armedForAdd(): Boolean = (_state.value as? AppState.ShoppingList)?.addNextScan ?: false
+
+    // rearmAdd: a failed add-to-list scan leaves the "+" armed, so a retry
+    // scan still goes on the list rather than being bought.
+    private fun flagShoppingScanError(message: String, cause: Throwable?, rearmAdd: Boolean = false) {
+        val current = _state.value as? AppState.ShoppingList ?: return
+        _state.value = current.copy(
+            scanErrorTrigger = System.currentTimeMillis(),
+            scanError = message,
+            isProcessing = false,
+            processingLabel = null,
+            sheet = null,
+            notice = null,
+            addNextScan = current.addNextScan || rearmAdd
+        )
+        playSound(errorSoundFor(cause))
+    }
+
+    private suspend fun isDoNotBuy(productId: Int): Boolean = try {
+        api.getProductUserfields(productId)["do_not_buy"]?.let {
+            it == true || it == 1 || it == "1" || it.toString().lowercase() == "true"
+        } ?: false
+    } catch (e: Exception) {
+        Log.e("BasilDebug", "Failed to check do_not_buy userfield: ${e.message}")
+        false
+    }
+
+    // The scanned product's parent and every other product under it that's in
+    // stock (the parent too, if it holds stock of its own).
+    private suspend fun loadSiblings(product: ProductDetails, allProducts: List<ProductDetails>): Pair<String?, List<SiblingStock>> {
+        val parentId = product.parent_product_id ?: return null to emptyList()
+        val parent = allProducts.find { it.id == parentId }
+        val stock = try {
+            api.getCurrentStock().associate { it.product_id to it.amount }
+        } catch (e: Exception) {
+            Log.e("BasilDebug", "Failed to fetch current stock: ${e.message}")
+            return parent?.name to emptyList()
+        }
+        val siblings = allProducts
+            .filter { it.id != product.id && (it.parent_product_id == parentId || it.id == parentId) }
+            .mapNotNull { p -> stock[p.id]?.takeIf { it > 0.0 }?.let { SiblingStock(p.name, it) } }
+            .sortedByDescending { it.amount }
+        return parent?.name to siblings
+    }
+
+    // Once the background job has found the parent, fill in the open sheet's siblings
+    private fun watchEnrichment(workId: UUID, sheetId: Long, productId: Int) {
+        val scheduler = enrichment ?: return
+        viewModelScope.launch {
+            try {
+                scheduler.observe(workId).first { it == null || it.state.isFinished }
+                if ((_state.value as? AppState.ShoppingList)?.sheet?.id != sheetId) return@launch
+                val (product, allProducts) = coroutineScope {
+                    val product = async { api.getProductById(productId).product }
+                    val all = async { api.getProducts() }
+                    product.await() to all.await()
+                }
+                val (parentName, siblings) = loadSiblings(product, allProducts)
+                val current = _state.value as? AppState.ShoppingList ?: return@launch
+                val sheet = current.sheet?.takeIf { it.id == sheetId } ?: return@launch
+                _state.value = current.copy(sheet = sheet.copy(parentName = parentName, siblings = siblings, siblingsPending = false))
+            } catch (e: Exception) {
+                Log.w("BasilDebug", "Couldn't refresh siblings: ${e.message}")
+                val current = _state.value as? AppState.ShoppingList ?: return@launch
+                val sheet = current.sheet?.takeIf { it.id == sheetId } ?: return@launch
+                _state.value = current.copy(sheet = sheet.copy(siblingsPending = false))
+            }
+        }
+    }
+
+    fun undoShoppingPurchase() {
+        val state = _state.value as? AppState.ShoppingList ?: return
+        val sheet = state.sheet ?: return
+        val purchase = lastShoppingPurchase?.takeIf { it.sheetId == sheet.id } ?: return
+        if (sheet.isUndoing || sheet.isUndone) return
+        _state.value = state.copy(sheet = sheet.copy(isUndoing = true))
+
+        viewModelScope.launch {
+            shoppingMutex.withLock {
+                try {
+                    api.undoTransaction(purchase.transactionId)
+                    purchase.stockId?.let { enrichment?.cancelStockEntryFix(it) }
+                    purchase.listItemBefore?.let {
+                        api.updateShoppingListItem(it.id, mapOf("amount" to it.amount, "done" to 0))
+                    }
+                    lastShoppingPurchase = null
+
+                    val items = enrichListItems(api.getShoppingList(), api.getProducts())
+                    val newStock = api.getProductById(sheet.product.id).stock_amount ?: 0.0
+                    val current = _state.value as? AppState.ShoppingList
+                    val currentSheet = current?.sheet?.takeIf { it.id == sheet.id } ?: sheet
+                    _state.value = AppState.ShoppingList(
+                        items = items,
+                        sheet = currentSheet.copy(isUndoing = false, isUndone = true, newStock = newStock),
+                        addNextScan = armedForAdd()
+                    )
+                    playSound(ScanSound.UNDONE)
+                } catch (e: Exception) {
+                    val message = if (e is HttpException) {
+                        val body = e.response()?.errorBody()?.string().orEmpty()
+                        if (e.code() == 400 && body.contains("undone", ignoreCase = true)) "Already undone" else "HTTP ${e.code()}: Undo failed"
+                    } else "Connection Error: Undo failed"
+                    val current = _state.value as? AppState.ShoppingList
+                    if (current != null) {
+                        _state.value = current.copy(
+                            scanError = message,
+                            scanErrorTrigger = System.currentTimeMillis(),
+                            sheet = current.sheet?.takeIf { it.id == sheet.id }?.copy(isUndoing = false)
+                        )
+                    }
+                    playSound(errorSoundFor(e))
+                }
+            }
+        }
+    }
+
+    // Clears a shopping error once its timer runs out, unless a newer error replaced it
+    fun clearShoppingScanError(trigger: Long) {
+        val state = _state.value as? AppState.ShoppingList ?: return
+        if (state.scanErrorTrigger == trigger && state.scanError != null) {
+            _state.value = state.copy(scanError = null)
+        }
+    }
+
+    fun dismissPurchaseSheet(sheetId: Long) {
+        val state = _state.value as? AppState.ShoppingList ?: return
+        if (state.sheet?.id == sheetId && state.sheet.isUndoing.not()) {
+            _state.value = state.copy(sheet = null)
         }
     }
 
@@ -259,34 +603,21 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
                 playSound(ScanSound.ERROR)
                 return
             }
+            val now = System.currentTimeMillis()
+            if (barcode == lastScannedBarcode && (now - lastScanTime) < 1500) {
+                Log.d("BasilDebug", "Scan ignored: Duplicate debounced.")
+                return
+            }
+            lastScannedBarcode = barcode
+            lastScanTime = now
+            // "Add next scan" applies to this one scan only; the one after
+            // goes back to purchasing.
+            val addToList = currentState.addNextScan
+            if (addToList) _state.value = currentState.copy(addNextScan = false)
+            // Scans queue up rather than overlap: each one changes Grocy.
             viewModelScope.launch {
-                try {
-                    val response = api.getProductByBarcode(barcode)
-                    val product = response.product
-                    api.addToShoppingList(AddToShoppingListRequest(product_id = product.id, amount = 1))
-                    val items = api.getShoppingList()
-                    val allProducts = api.getProducts()
-                    
-                    val enrichedItems = items.map { item ->
-                        val p = allProducts.find { it.id == item.product_id }
-                        val group = cachedGroups.find { it.id == p?.product_group_id }
-                        
-                        item.copy(
-                            product_name = p?.name ?: item.product_name,
-                            product_picture_file_name = p?.picture_file_name ?: item.product_picture_file_name,
-                            category_name = group?.name ?: "Uncategorized"
-                        )
-                    }.sortedWith(compareBy({ it.category_name }, { 
-                        val d = it.done
-                        if (d is Boolean) if (d) 1 else 0
-                        else if (d is String) d.toIntOrNull() ?: 0
-                        else (d as? Number)?.toInt() ?: 0
-                    }, { it.product_name ?: it.note }))
-
-                    _state.value = AppState.ShoppingList(items = enrichedItems, newlyAddedProductId = product.id)
-                } catch (e: Exception) {
-                    _state.value = currentState.copy(scanErrorTrigger = System.currentTimeMillis())
-                    playSound(errorSoundFor(e))
+                shoppingMutex.withLock {
+                    if (addToList) addScanToShoppingList(barcode) else purchaseFromShoppingList(barcode)
                 }
             }
             return
@@ -332,7 +663,7 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
         val locationName = batchMoveLocationName ?: ""
         var currentProduct: ProductDetails? = null
         
-        _state.value = AppState.Loading("Moving product to $locationName...", showGrocy = true)
+        _state.value = AppState.Loading("Transferring to $locationName...", showGrocy = true)
         try {
             val response = api.getProductByBarcode(barcode)
             val product = response.product
@@ -380,26 +711,26 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             val amountStr = if (moveAmount % 1.0 == 0.0) moveAmount.toInt().toString() else moveAmount.toString()
 
             _state.value = AppState.Success(
-                message = "Moved!",
-                stockMessage = "$amountStr units of ${product.name} relocated from $sourceLocName to $locationName",
+                message = "Transferred!",
+                stockMessage = "$amountStr units of ${product.name} transferred from $sourceLocName to $locationName",
                 product = product,
                 lastScannedBarcode = barcode,
                 addedAmount = moveAmount
             )
         } catch (e: HttpException) {
             val errorBody = e.response()?.errorBody()?.string() ?: ""
-            Log.e("BasilDebug", "Batch Move HTTP Error ${e.code()}: $errorBody")
+            Log.e("BasilDebug", "Transfer HTTP Error ${e.code()}: $errorBody")
 
             if (e.code() == 400) {
                 showError("Product not found in Grocy.")
             } else if (e.code() == 405) {
                 val detail = if (currentProduct?.is_parent == 1) " (Parent Product)" else ""
-                showError("Move not allowed$detail. Check settings.")
+                showError("Transfer not allowed$detail. Check settings.")
             } else {
-                showError("Move failed: HTTP ${e.code()}", e)
+                showError("Transfer failed: HTTP ${e.code()}", e)
             }
         } catch (e: Exception) {
-            Log.e("BasilDebug", "Batch Move failed", e)
+            Log.e("BasilDebug", "Transfer failed", e)
             showError("Connection Error: Check your network.", e)
         }
     }
@@ -579,30 +910,22 @@ class ScannerViewModel(private val api: GrocyApi, private val geminiApiKey: Stri
             }
             AppMode.CONSUME -> confirmAction(product.id, amount, null, null)
             AppMode.PURCHASE -> {
-                try {
-                    val productUf = api.getProductUserfields(product.id)
-                    val doNotBuy = productUf["do_not_buy"]?.let {
-                        it == true || it == 1 || it == "1" || it.toString().lowercase() == "true"
-                    } ?: false
-                    if (doNotBuy) {
-                        var autoPrint = false
-                        if (barcodeId != null) {
-                            try {
-                                val uf = api.getBarcodeUserfields(barcodeId)
-                                autoPrint = (uf["auto_print_label"]?.toString() ?: "0") == "1"
-                            } catch (_: Exception) {}
-                        }
-                        _state.value = AppState.DoNotBuyWarning(
-                            product = product,
-                            estimatedPrice = knownPrice,
-                            amount = amount,
-                            autoPrint = autoPrint,
-                            scannedBarcode = scannedBarcode
-                        )
-                        return
+                if (isDoNotBuy(product.id)) {
+                    var autoPrint = false
+                    if (barcodeId != null) {
+                        try {
+                            val uf = api.getBarcodeUserfields(barcodeId)
+                            autoPrint = (uf["auto_print_label"]?.toString() ?: "0") == "1"
+                        } catch (_: Exception) {}
                     }
-                } catch (e: Exception) {
-                    Log.e("BasilDebug", "Failed to check do_not_buy userfield: ${e.message}")
+                    _state.value = AppState.DoNotBuyWarning(
+                        product = product,
+                        estimatedPrice = knownPrice,
+                        amount = amount,
+                        autoPrint = autoPrint,
+                        scannedBarcode = scannedBarcode
+                    )
+                    return
                 }
 
                 var autoPrint = false

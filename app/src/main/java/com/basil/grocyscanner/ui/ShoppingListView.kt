@@ -55,7 +55,6 @@ import com.basil.grocyscanner.ui.theme.ErrorRed
 fun ShoppingListView(
     items: List<ShoppingListItem>,
     newlyAddedProductId: Int? = null,
-    scanError: String? = null,
     onToggleDone: (ShoppingListItem) -> Unit
 ) {
     val context = LocalContext.current
@@ -80,16 +79,6 @@ fun ShoppingListView(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        if (scanError != null) {
-            Text(
-                text = scanError,
-                color = ErrorRed,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
-            )
-        }
         if (items.isEmpty()) {
             Text("List is empty", color = Color.Gray, modifier = Modifier.padding(16.dp))
         } else {
