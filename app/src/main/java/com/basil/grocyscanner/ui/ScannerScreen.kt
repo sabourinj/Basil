@@ -3,6 +3,7 @@ package com.basil.grocyscanner.ui
 import android.content.Context
 import android.os.VibrationEffect
 import android.os.VibratorManager
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -132,6 +133,16 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
             }
             else -> {}
         }
+    }
+
+    // The phone's back gesture leaves a mode the same way its bottom-bar
+    // button does: the X for shopping, "End Transfer Mode" for transfers.
+    BackHandler(enabled = state is ScannerViewModel.AppState.ShoppingList) {
+        viewModel.resetState()
+    }
+    BackHandler(enabled = currentMode == AppMode.BATCH_MOVE && state !is ScannerViewModel.AppState.ShoppingList) {
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        viewModel.setMode(AppMode.PURCHASE)
     }
 
     // Shopping list haptics fire per scan outcome, not on every list refresh.
