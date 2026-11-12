@@ -107,7 +107,7 @@ internal fun SetupScaffold(content: @Composable ColumnScope.() -> Unit) {
 private val GEMINI_LOGO_SIZE = 80.dp
 
 @Composable
-fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit, onCameraScan: (() -> Unit)? = null) {
+fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit, onCameraScan: ((String) -> Unit)? = null) {
     var step by remember { mutableIntStateOf(1) }
 
     SetupScaffold {
@@ -151,7 +151,7 @@ fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit, onCameraScan: (() 
 }
 
 @Composable
-fun UnconfiguredScreen(onCameraScan: (() -> Unit)? = null) {
+fun UnconfiguredScreen(onCameraScan: ((String) -> Unit)? = null) {
     SetupScaffold {
         Image(painter = painterResource(id = R.drawable.grocy_logo), contentDescription = "Grocy Logo", modifier = Modifier.size(180.dp))
         Text("API Key Required", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
@@ -161,14 +161,19 @@ fun UnconfiguredScreen(onCameraScan: (() -> Unit)? = null) {
     }
 }
 
-/** Opens the camera to read a setup QR code; shown only when scanning with the camera. */
+/**
+ * A "Scan QR Code" button that turns into the camera in the same spot; shown
+ * only when scanning with the camera.
+ */
 @Composable
-private fun SetupScanButton(onClick: () -> Unit) {
+private fun SetupScanButton(onScan: (String) -> Unit) {
     Spacer(modifier = Modifier.height(32.dp))
-    Button(onClick = onClick, colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = DeepPurple)) {
-        Icon(imageVector = Icons.Filled.PhotoCamera, contentDescription = null, modifier = Modifier.size(20.dp))
-        Spacer(modifier = Modifier.width(12.dp))
-        Text("Scan QR Code", fontWeight = FontWeight.Bold)
+    InlineCameraScan(onScan = onScan, width = 280.dp, height = 180.dp) { start ->
+        Button(onClick = start, colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = DeepPurple)) {
+            Icon(imageVector = Icons.Filled.PhotoCamera, contentDescription = null, modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.width(12.dp))
+            Text("Scan QR Code", fontWeight = FontWeight.Bold)
+        }
     }
 }
 

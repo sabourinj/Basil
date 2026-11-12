@@ -61,8 +61,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
@@ -88,13 +86,17 @@ fun GrocyScannerApp(
     viewModel: ScannerViewModel,
     resetDurationSeconds: Int,
     onNavigateToSettings: () -> Unit,
-    // Opens the camera scanner; null when this device uses a hardware scanner
-    onCameraScan: (() -> Unit)? = null
+    // Takes camera scans; null when this device uses a hardware scanner
+    onCameraScan: ((String) -> Unit)? = null
 ) {
     val state by viewModel.state.collectAsState()
     val currentMode by viewModel.currentMode.collectAsState()
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
+
+    // Scan buttons with no "Tap to Scan" box beside them open a pop-up viewfinder
+    val openCameraPopup = rememberCameraScanner { onCameraScan?.invoke(it) }
+    val openCameraCard: (() -> Unit)? = if (onCameraScan != null) openCameraPopup else null
 
     val vibrator = remember {
         val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
@@ -205,7 +207,7 @@ fun GrocyScannerApp(
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 viewModel.toggleAddNextScanToList()
                                 // With the camera, arming goes straight to the scan
-                                if (!shoppingState.addNextScan) onCameraScan?.invoke()
+                                if (!shoppingState.addNextScan) openCameraCard?.invoke()
                             },
                             colors = IconButtonDefaults.filledIconButtonColors(
                                 containerColor = if (shoppingState.addNextScan) SuccessGreen else Color.Transparent,
@@ -253,7 +255,7 @@ fun GrocyScannerApp(
                     ShoppingStatusBar(
                         state = state as ScannerViewModel.AppState.ShoppingList,
                         onExit = { viewModel.resetState() },
-                        onCameraScan = onCameraScan
+                        onCameraScan = openCameraCard
                     )
                 } else {
                     Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -274,18 +276,16 @@ fun GrocyScannerApp(
             }
         },
         floatingActionButton = {
-            // Only where a scan does something: not under a prompt that rejects
-            // scans, not while busy, and not while shopping (its status bar has one)
+            // Where a scan does something but there is no "Tap to Scan" box: not under a
+            // prompt that rejects scans, not while busy, not while shopping (its status bar has one)
             val scanWelcome = when (state) {
-                is ScannerViewModel.AppState.Idle,
-                is ScannerViewModel.AppState.BatchMoveActive,
                 is ScannerViewModel.AppState.Success,
                 is ScannerViewModel.AppState.InventoryResult,
                 is ScannerViewModel.AppState.LinkingChild,
                 is ScannerViewModel.AppState.Error -> true
                 else -> false
             }
-            if (onCameraScan != null && scanWelcome) CameraScanFab(onClick = onCameraScan)
+            if (openCameraCard != null && scanWelcome) CameraScanFab(onClick = openCameraCard)
         },
         containerColor = Color.Transparent
     ) { paddingValues ->
@@ -296,7 +296,7 @@ fun GrocyScannerApp(
         ) {
             when (val currentState = state) {
                 is ScannerViewModel.AppState.Idle -> {
-                    ReadyToScanBox(onTap = onCameraScan)
+                    ReadyToScanBox(onCameraScan = onCameraScan)
                 }
                 is ScannerViewModel.AppState.BatchMoveActive -> {
                     Icon(imageVector = Icons.Default.MoveDown, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(64.dp))
@@ -304,7 +304,7 @@ fun GrocyScannerApp(
                     Text("Transferring to:", style = MaterialTheme.typography.titleMedium, color = Color.LightGray)
                     Text(text = currentState.locationName, style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                     Spacer(modifier = Modifier.height(24.dp))
-                    ReadyToScanBox(width = 220.dp, height = 130.dp, fontSize = 18.sp, onTap = onCameraScan)
+                    ReadyToScanBox(width = 220.dp, height = 130.dp, fontSize = 18.sp, onCameraScan = onCameraScan)
                 }
                 is ScannerViewModel.AppState.Loading -> {
                     Box(contentAlignment = Alignment.Center) {
@@ -522,31 +522,38 @@ fun ReadyToScanBox(
     width: androidx.compose.ui.unit.Dp = 280.dp,
     height: androidx.compose.ui.unit.Dp = 180.dp,
     fontSize: androidx.compose.ui.unit.TextUnit = 24.sp,
-    // Set when scanning with the camera: the box becomes a "Tap to Scan" button
-    onTap: (() -> Unit)? = null
+    // Set when scanning with the camera: tapping the box turns it into the live camera
+    onCameraScan: ((String) -> Unit)? = null
+) {
+    if (onCameraScan == null) {
+        ScanBoxFrame(width, height) {
+            Text(text = "Ready to Scan", fontSize = fontSize, fontWeight = FontWeight.SemiBold, color = Color.White)
+        }
+    } else {
+        InlineCameraScan(onScan = onCameraScan, width = width, height = height, modifier = Modifier.padding(24.dp)) { start ->
+            ScanBoxFrame(width, height, padded = false, onClick = start) {
+                Text(text = "Tap to Scan", fontSize = fontSize, fontWeight = FontWeight.SemiBold, color = Color.White)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScanBoxFrame(
+    width: androidx.compose.ui.unit.Dp,
+    height: androidx.compose.ui.unit.Dp,
+    padded: Boolean = true,
+    onClick: (() -> Unit)? = null,
+    content: @Composable () -> Unit
 ) {
     Box(
         modifier = Modifier
-            .padding(24.dp)
+            .then(if (padded) Modifier.padding(24.dp) else Modifier)
             .size(width = width, height = height)
-            .then(if (onTap != null) Modifier.clickable(onClick = onTap) else Modifier)
-            .drawBehind {
-                val strokeWidthPx = 4.dp.toPx()
-                val cornerLengthPx = (width.toPx() * 0.15f).coerceAtLeast(20.dp.toPx())
-                val bracketColor = Color.White.copy(alpha = 0.7f)
-                val w = size.width
-                val h = size.height
-                drawLine(bracketColor, Offset(0f, 0f), Offset(cornerLengthPx, 0f), strokeWidthPx)
-                drawLine(bracketColor, Offset(0f, 0f), Offset(0f, cornerLengthPx), strokeWidthPx)
-                drawLine(bracketColor, Offset(w, 0f), Offset(w - cornerLengthPx, 0f), strokeWidthPx)
-                drawLine(bracketColor, Offset(w, 0f), Offset(w, cornerLengthPx), strokeWidthPx)
-                drawLine(bracketColor, Offset(0f, h), Offset(cornerLengthPx, h), strokeWidthPx)
-                drawLine(bracketColor, Offset(0f, h), Offset(0f, h - cornerLengthPx), strokeWidthPx)
-                drawLine(bracketColor, Offset(w, h), Offset(w - cornerLengthPx, h), strokeWidthPx)
-                drawLine(bracketColor, Offset(w, h), Offset(w, h - cornerLengthPx), strokeWidthPx)
-            },
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .scanCornerBrackets(width),
         contentAlignment = Alignment.Center
     ) {
-        Text(text = if (onTap != null) "Tap to Scan" else "Ready to Scan", fontSize = fontSize, fontWeight = FontWeight.SemiBold, color = Color.White)
+        content()
     }
 }

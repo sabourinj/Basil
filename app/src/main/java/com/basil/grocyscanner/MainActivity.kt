@@ -36,7 +36,6 @@ import com.basil.grocyscanner.data.UserfieldCreateRequest
 import com.basil.grocyscanner.ui.AiSetupScreen
 import com.basil.grocyscanner.ui.CameraScanning
 import com.basil.grocyscanner.ui.ScannerChoiceScreen
-import com.basil.grocyscanner.ui.rememberCameraScanner
 import com.basil.grocyscanner.ui.GrocyScannerApp
 import com.basil.grocyscanner.ui.SettingsScreen
 import com.basil.grocyscanner.ui.UnconfiguredScreen
@@ -156,8 +155,8 @@ class MainActivity : ComponentActivity() {
                     val lifecycleOwner = LocalLifecycleOwner.current
 
                     // Camera scans feed the same path as the hardware scanner
-                    val startCameraScan = rememberCameraScanner { handleScan(it, fromHardware = false) }
-                    val onCameraScan: (() -> Unit)? = if (cameraScanEnabled) startCameraScan else null
+                    val onCameraScan: ((String) -> Unit)? =
+                        if (cameraScanEnabled) { code -> handleScan(code, fromHardware = false) } else null
 
                     DisposableEffect(lifecycleOwner, currentScreen) {
                         val receiver = object : BroadcastReceiver() {
