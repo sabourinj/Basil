@@ -26,6 +26,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -33,6 +34,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -40,6 +42,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FlashlightOff
 import androidx.compose.material.icons.filled.FlashlightOn
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -62,6 +65,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -435,29 +439,30 @@ fun ScannerChoiceScreen(onChoose: (useCamera: Boolean) -> Unit) {
         Spacer(modifier = Modifier.height(32.dp))
         ScannerChoiceCard(
             title = "Phone camera",
-            detail = "Tap to scan whenever you're ready.",
+            icon = Icons.Filled.PhotoCamera,
             onClick = { onChoose(true) }
         )
         Spacer(modifier = Modifier.height(16.dp))
         ScannerChoiceCard(
             title = "Built-in scanner",
-            detail = "For scanner devices (PDAs) set to send scans to Basil. Or just scan a barcode now.",
+            icon = Icons.Filled.QrCodeScanner,
             onClick = { onChoose(false) }
         )
     }
 }
 
 @Composable
-private fun ScannerChoiceCard(title: String, detail: String, onClick: () -> Unit) {
-    Column(
+private fun ScannerChoiceCard(title: String, icon: ImageVector, onClick: () -> Unit) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color.White.copy(alpha = 0.08f), MaterialTheme.shapes.large)
             .clickable(onClick = onClick)
-            .padding(20.dp)
+            .padding(20.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
+        Icon(imageVector = icon, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(32.dp))
+        Spacer(modifier = Modifier.width(16.dp))
         Text(title, style = MaterialTheme.typography.titleLarge, color = Color.White, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(detail, style = MaterialTheme.typography.bodyMedium, color = Color.LightGray)
     }
 }
