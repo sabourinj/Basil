@@ -202,7 +202,10 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                             Icon(imageVector = Icons.Filled.ShoppingCart, contentDescription = "Shopping List", tint = Color.White)
                         }
                     }
-                    IconButton(onClick = onNavigateToSettings) { Icon(imageVector = Icons.Filled.Settings, contentDescription = "Settings", tint = Color.White) }
+                    // Settings stays out of the way while shopping
+                    if (shoppingState == null) {
+                        IconButton(onClick = onNavigateToSettings) { Icon(imageVector = Icons.Filled.Settings, contentDescription = "Settings", tint = Color.White) }
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkerHeaderPurple, titleContentColor = Color.White)
             )
