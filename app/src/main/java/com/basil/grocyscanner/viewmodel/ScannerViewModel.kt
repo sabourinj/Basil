@@ -1085,6 +1085,68 @@ class ScannerViewModel(
         }
     }
 
+    /**
+     * Purchase mode: after scanning one, set how many identical items were
+     * bought. Changes the amount on the stock entry just added rather than
+     * adding entries, so the background price/date fix and label printing
+     * still find a single entry.
+     */
+    fun setPurchaseQuantity(stockId: String, total: Double) {
+        val success = _state.value as? AppState.Success ?: return
+        // A scan since the prompt opened moved on to something else
+        if (success.stockId != stockId || total <= 0.0 || total == success.addedAmount) return
+        val product = success.product ?: return
+        if (isProcessingAction) return
+        isProcessingAction = true
+
+        viewModelScope.launch {
+            _state.value = AppState.Loading("Updating quantity...", showGrocy = true)
+            try {
+                val entry = api.getStockEntries(product.id).find { it.stock_id == stockId }
+                if (entry == null) {
+                    // Consumed or undone elsewhere in the meantime
+                    showError("That stock entry is gone, so its quantity can't change.")
+                    return@launch
+                }
+                val newAmount = entry.amount + (total - success.addedAmount)
+                if (newAmount <= 0.0) {
+                    showError("Some of this purchase is already used, so it can't go that low.")
+                    return@launch
+                }
+                // Grocy's entry edit wants the entry's other fields restated, as StockEntryFixWorker does
+                val update = mutableMapOf<String, Any>(
+                    "amount" to newAmount,
+                    "open" to (entry.open == 1)
+                )
+                entry.purchased_date?.let { update["purchased_date"] = it.take(10) }
+                entry.best_before_date?.let { update["best_before_date"] = it }
+                entry.price?.let { update["price"] = it }
+                entry.location_id?.let { update["location_id"] = it }
+                entry.shopping_location_id?.let { update["shopping_location_id"] = it }
+                entry.note?.let { update["note"] = it }
+                api.updateStockEntry(entry.id, update)
+
+                val updatedData = api.getProductById(product.id)
+                val remaining = updatedData.stock_amount ?: 0.0
+                val stockStr = if (remaining % 1.0 == 0.0) remaining.toInt().toString() else remaining.toString()
+                _state.value = success.copy(
+                    stockMessage = "New stock level: $stockStr",
+                    product = updatedData.product,
+                    currentStock = remaining,
+                    addedAmount = total,
+                    parentStock = fetchParentStock(updatedData.product, remaining),
+                    isPrinting = false
+                )
+            } catch (e: HttpException) {
+                showError("HTTP ${e.code()}: Quantity change failed", e)
+            } catch (e: Exception) {
+                showError("Connection Error: Quantity change failed", e)
+            } finally {
+                isProcessingAction = false
+            }
+        }
+    }
+
     fun undoConsume() {
         val success = _state.value as? AppState.Success ?: return
         val transactionId = success.transactionId ?: return

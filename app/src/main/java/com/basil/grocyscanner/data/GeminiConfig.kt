@@ -3,13 +3,14 @@ package com.basil.grocyscanner.data
 import android.content.SharedPreferences
 
 object GeminiConfig {
-    // Used until a model is picked in Settings. Keep the nightly parent Apps
-    // Script on the same model so both name parents the same way.
-    const val DEFAULT_MODEL = "gemini-3.8-flash"
-
     // Google's alias for its newest Flash model. It moves without notice
-    // (sometimes to a preview model), so it's offered but never the default.
+    // (sometimes to a preview model); pick a fixed model in Settings to pin one.
     const val LATEST_FLASH_ALIAS = "gemini-flash-latest"
+
+    // Used until a model is picked in Settings: always Google's newest Flash.
+    // Keep the nightly parent Apps Script on the same model so both name
+    // parents the same way.
+    const val DEFAULT_MODEL = LATEST_FLASH_ALIAS
 
     const val PREF_KEY = "GEMINI_MODEL"
 

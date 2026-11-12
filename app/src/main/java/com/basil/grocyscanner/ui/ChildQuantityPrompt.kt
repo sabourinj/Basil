@@ -44,7 +44,35 @@ fun ChildQuantityPrompt(
     onConfirm: (Double) -> Unit,
     onCancel: () -> Unit
 ) {
-    var quantity by remember { mutableDoubleStateOf(12.0) }
+    QuantityPrompt(
+        title = "Multipack Quantity",
+        question = "How many items are in this box?",
+        product = product,
+        initialQuantity = 12.0,
+        presets = listOf(6.0, 12.0, 24.0, 48.0),
+        confirmLabel = "Link & Save",
+        onConfirm = onConfirm,
+        onCancel = onCancel
+    )
+}
+
+/**
+ * The quantity picker shared by linking a multipack and setting how many of
+ * a product were just purchased: a big number with - and +, a row of
+ * presets, and Cancel / confirm.
+ */
+@Composable
+fun QuantityPrompt(
+    title: String,
+    question: String,
+    product: ProductDetails,
+    initialQuantity: Double,
+    presets: List<Double>,
+    confirmLabel: String,
+    onConfirm: (Double) -> Unit,
+    onCancel: () -> Unit
+) {
+    var quantity by remember { mutableDoubleStateOf(initialQuantity) }
 
     Dialog(onDismissRequest = onCancel) {
         Surface(
@@ -57,13 +85,13 @@ fun ChildQuantityPrompt(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "Multipack Quantity",
+                    text = title,
                     style = MaterialTheme.typography.headlineSmall,
                     color = Color.White,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "How many items are in this box?",
+                    text = question,
                     style = MaterialTheme.typography.bodySmall,
                     color = Color.LightGray,
                     textAlign = TextAlign.Center
@@ -118,7 +146,7 @@ fun ChildQuantityPrompt(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf(6.0, 12.0, 24.0, 48.0).forEach { preset ->
+                    presets.forEach { preset ->
                         Button(
                             onClick = { quantity = preset },
                             modifier = Modifier.weight(1f).height(44.dp),
@@ -153,7 +181,7 @@ fun ChildQuantityPrompt(
                         modifier = Modifier.weight(1f).height(56.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = DeepPurple)
                     ) {
-                        Text("Link & Save", fontWeight = FontWeight.Bold)
+                        Text(confirmLabel, fontWeight = FontWeight.Bold)
                     }
                 }
             }

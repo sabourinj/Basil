@@ -11,6 +11,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -58,21 +59,25 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.window.Dialog
 import com.basil.grocyscanner.R
 import com.basil.grocyscanner.ui.theme.DarkerHeaderPurple
@@ -84,15 +89,80 @@ import com.basil.grocyscanner.viewmodel.ScannerViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNavigateToSettings: () -> Unit) {
+fun GrocyScannerApp(
+    viewModel: ScannerViewModel,
+    resetDurationSeconds: Int,
+    onNavigateToSettings: () -> Unit,
+    // Takes camera scans; null when this device uses a hardware scanner
+    onCameraScan: ((String) -> Unit)? = null,
+    // The Sounds and Vibration settings
+    soundEnabled: Boolean = true,
+    vibrationEnabled: Boolean = true,
+    // Volume-button presses that turn the camera on or off; null when not in use
+    cameraTriggers: Flow<Unit>? = null
+) {
     val state by viewModel.state.collectAsState()
     val currentMode by viewModel.currentMode.collectAsState()
     val context = LocalContext.current
-    val haptic = LocalHapticFeedback.current
+    // Read through State so effects already running see a change
+    val soundOn by rememberUpdatedState(soundEnabled)
+    val vibrationOn by rememberUpdatedState(vibrationEnabled)
+    // Button haptics, silenced along with every other vibration
+    val systemHaptic = LocalHapticFeedback.current
+    val haptic = remember(systemHaptic) {
+        object : HapticFeedback {
+            override fun performHapticFeedback(hapticFeedbackType: HapticFeedbackType) {
+                if (vibrationOn) systemHaptic.performHapticFeedback(hapticFeedbackType)
+            }
+        }
+    }
 
-    val vibrator = remember {
+    // Transfer Mode: once an item is scanned with the camera, the camera turns itself
+    // back on for the next one, until its X is tapped, it times out, or the mode ends
+    var keepTransferCameraOn by remember { mutableStateOf(false) }
+    LaunchedEffect(currentMode) {
+        if (currentMode != AppMode.BATCH_MOVE) keepTransferCameraOn = false
+    }
+    val cameraScan: ((String) -> Unit)? = onCameraScan?.let { sink ->
+        { code: String ->
+            if (currentMode == AppMode.BATCH_MOVE) keepTransferCameraOn = true
+            sink(code)
+        }
+    }
+
+    // Scan buttons with no "Tap to Scan" box beside them open a pop-up viewfinder
+    val openCameraPopup = rememberCameraScanner(
+        onScan = { cameraScan?.invoke(it) },
+        closeOnVolumeKeys = cameraTriggers != null
+    )
+    val openCameraCard: (() -> Unit)? = if (onCameraScan != null) openCameraPopup else null
+
+    // Volume buttons: switch the "Tap to Scan" box's camera where there is one,
+    // otherwise open the pop-up camera. Ignored while busy or under a prompt.
+    val boxCameraToggles = remember { MutableSharedFlow<Unit>(extraBufferCapacity = 1) }
+    val latestState by rememberUpdatedState(state)
+    val latestOpenCameraCard by rememberUpdatedState(openCameraCard)
+    LaunchedEffect(cameraTriggers) {
+        cameraTriggers?.collect {
+            when (latestState) {
+                is ScannerViewModel.AppState.Idle,
+                is ScannerViewModel.AppState.BatchMoveActive -> boxCameraToggles.tryEmit(Unit)
+                is ScannerViewModel.AppState.Success,
+                is ScannerViewModel.AppState.InventoryResult,
+                is ScannerViewModel.AppState.LinkingChild,
+                is ScannerViewModel.AppState.Error,
+                is ScannerViewModel.AppState.ShoppingList -> latestOpenCameraCard?.invoke()
+                else -> {}
+            }
+        }
+    }
+
+    val systemVibrator = remember {
         val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
         vibratorManager.defaultVibrator
+    }
+    fun vibrate(effect: VibrationEffect) {
+        if (vibrationOn) systemVibrator.vibrate(effect)
     }
 
     var showClearCompleted by remember { mutableStateOf(false) }
@@ -102,7 +172,7 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
         onDispose { scanSounds.release() }
     }
     LaunchedEffect(viewModel) {
-        viewModel.sounds.collect { scanSounds.play(it) }
+        viewModel.sounds.collect { if (soundOn) scanSounds.play(it) }
     }
 
     LaunchedEffect(state) {
@@ -110,28 +180,28 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
             is ScannerViewModel.AppState.Success -> {
                 if (currentState.isPrinting || currentState.isOpened || currentState.isAddingToList) {
                     val pattern = longArrayOf(0, 200, 100, 200)
-                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                    vibrate(VibrationEffect.createWaveform(pattern, -1))
                 } else {
-                    vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+                    vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
                 }
             }
             is ScannerViewModel.AppState.InventoryResult -> {
                 if (currentState.isOpened) {
                     val pattern = longArrayOf(0, 200, 100, 200)
-                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                    vibrate(VibrationEffect.createWaveform(pattern, -1))
                 } else {
-                    vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+                    vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
                 }
             }
             is ScannerViewModel.AppState.NeedsDate -> {
                 if (currentState.scanErrorTrigger > 0) {
                     // Very strong 5-pulse error haptic, spread out
                     val pattern = longArrayOf(0, 250, 200, 250, 200, 250, 200, 250, 200, 250)
-                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                    vibrate(VibrationEffect.createWaveform(pattern, -1))
                 } else {
                     // Initial prompt haptic
                     val pattern = longArrayOf(0, 150, 100, 150)
-                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                    vibrate(VibrationEffect.createWaveform(pattern, -1))
                 }
             }
             else -> {}
@@ -153,7 +223,7 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
     LaunchedEffect(shopping?.scanErrorTrigger) {
         if ((shopping?.scanErrorTrigger ?: 0L) > 0L) {
             val pattern = longArrayOf(0, 250, 200, 250, 200, 250, 200, 250, 200, 250)
-            vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+            vibrate(VibrationEffect.createWaveform(pattern, -1))
         }
     }
     // Errors clear on the same timer as every other result screen
@@ -165,16 +235,16 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
     }
     LaunchedEffect(shopping?.notice) {
         val notice = shopping?.notice ?: return@LaunchedEffect
-        vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+        vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
         kotlinx.coroutines.delay(resetDurationSeconds * 1000L)
         viewModel.clearShoppingNotice(notice)
     }
     LaunchedEffect(shopping?.sheet?.id) {
         val sheet = shopping?.sheet ?: return@LaunchedEffect
         if (sheet.isDoNotBuy) {
-            vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 250, 200, 250), -1))
+            vibrate(VibrationEffect.createWaveform(longArrayOf(0, 250, 200, 250), -1))
         } else {
-            vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+            vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
         }
     }
 
@@ -222,6 +292,8 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 viewModel.toggleAddNextScanToList()
+                                // With the camera, arming goes straight to the scan
+                                if (!shoppingState.addNextScan) openCameraCard?.invoke()
                             },
                             colors = IconButtonDefaults.filledIconButtonColors(
                                 containerColor = if (shoppingState.addNextScan) SuccessGreen else Color.Transparent,
@@ -268,7 +340,8 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                     // Shopping has one job, so the mode buttons give way to its status
                     ShoppingStatusBar(
                         state = state as ScannerViewModel.AppState.ShoppingList,
-                        onExit = { viewModel.resetState() }
+                        onExit = { viewModel.resetState() },
+                        onCameraScan = openCameraCard
                     )
                 } else {
                     Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -288,6 +361,18 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                 }
             }
         },
+        floatingActionButton = {
+            // Where a scan does something but there is no "Tap to Scan" box: not under a
+            // prompt that rejects scans, not while busy, not while shopping (its status bar has one)
+            val scanWelcome = when (state) {
+                is ScannerViewModel.AppState.Success,
+                is ScannerViewModel.AppState.InventoryResult,
+                is ScannerViewModel.AppState.LinkingChild,
+                is ScannerViewModel.AppState.Error -> true
+                else -> false
+            }
+            if (openCameraCard != null && scanWelcome) CameraScanFab(onClick = openCameraCard)
+        },
         containerColor = Color.Transparent
     ) { paddingValues ->
         Column(
@@ -297,7 +382,7 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
         ) {
             when (val currentState = state) {
                 is ScannerViewModel.AppState.Idle -> {
-                    ReadyToScanBox()
+                    ReadyToScanBox(onCameraScan = cameraScan, cameraToggles = boxCameraToggles)
                 }
                 is ScannerViewModel.AppState.BatchMoveActive -> {
                     Icon(imageVector = Icons.Default.MoveDown, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(64.dp))
@@ -305,7 +390,14 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                     Text("Transferring to:", style = MaterialTheme.typography.titleMedium, color = Color.LightGray)
                     Text(text = currentState.locationName, style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                     Spacer(modifier = Modifier.height(24.dp))
-                    ReadyToScanBox(width = 220.dp, height = 130.dp, fontSize = 18.sp)
+                    // After a camera scan, the camera is back on for the next item
+                    ReadyToScanBox(
+                        width = 220.dp, height = 130.dp, fontSize = 18.sp,
+                        onCameraScan = cameraScan,
+                        autoStartCamera = keepTransferCameraOn,
+                        onCameraStopped = { keepTransferCameraOn = false },
+                        cameraToggles = boxCameraToggles
+                    )
                 }
                 is ScannerViewModel.AppState.Loading -> {
                     Box(contentAlignment = Alignment.Center) {
@@ -354,6 +446,7 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                         animationSpec = infiniteRepeatable(animation = tween(400, easing = LinearEasing), repeatMode = RepeatMode.Reverse),
                         label = "blinkAlpha"
                     )
+                    var showQuantityPrompt by remember { mutableStateOf(false) }
 
                     Text(currentState.message, style = MaterialTheme.typography.headlineMedium, color = SuccessGreen, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold)
 
@@ -371,7 +464,25 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                         val prodId = currentState.product.id
                         if (currentMode == AppMode.PURCHASE && currentState.currentStock > 0.0) {
                             Spacer(modifier = Modifier.height(32.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                // How many identical items were bought; only for a fresh purchase
+                                // (a linked multipack has no single stock entry to change)
+                                if (currentState.stockId != null) {
+                                    FilledIconButton(
+                                        onClick = { showQuantityPrompt = true },
+                                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White, contentColor = DeepPurple),
+                                        modifier = Modifier.size(64.dp)
+                                    ) {
+                                        val qty = currentState.addedAmount
+                                        Text(
+                                            text = "×" + (if (qty % 1.0 == 0.0) qty.toInt().toString() else qty.toString()),
+                                            fontSize = 20.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.semantics { contentDescription = "Change quantity" }
+                                        )
+                                    }
+                                }
+
                                 FilledIconButton(
                                     onClick = { viewModel.performQuickAction(prodId, "print", currentState.stockId, currentState.addedAmount) },
                                     colors = IconButtonDefaults.filledIconButtonColors(
@@ -431,12 +542,32 @@ fun GrocyScannerApp(viewModel: ScannerViewModel, resetDurationSeconds: Int, onNa
                     }
 
                     Spacer(modifier = Modifier.height(32.dp))
-                    AutoResetCountdown(
-                        durationMillis = resetDurationSeconds * 1000L,
-                        message = if (currentMode == AppMode.BATCH_MOVE) "Ready for Next..." else "Ready to Scan...",
-                        resetTrigger = currentState,
-                        onTimeout = { viewModel.resetState() }
-                    )
+                    // Paused while the quantity prompt is open, so the result screen waits for it
+                    if (!showQuantityPrompt) {
+                        AutoResetCountdown(
+                            durationMillis = resetDurationSeconds * 1000L,
+                            message = if (currentMode == AppMode.BATCH_MOVE) "Ready for Next..." else "Ready to Scan...",
+                            resetTrigger = currentState,
+                            onTimeout = { viewModel.resetState() }
+                        )
+                    }
+
+                    val quantityStockId = currentState.stockId
+                    if (showQuantityPrompt && currentState.product != null && quantityStockId != null) {
+                        QuantityPrompt(
+                            title = "Quantity Purchased",
+                            question = "How many of this item did you buy?",
+                            product = currentState.product,
+                            initialQuantity = currentState.addedAmount,
+                            presets = listOf(2.0, 3.0, 4.0, 6.0),
+                            confirmLabel = "Save",
+                            onConfirm = { total ->
+                                showQuantityPrompt = false
+                                viewModel.setPurchaseQuantity(quantityStockId, total)
+                            },
+                            onCancel = { showQuantityPrompt = false }
+                        )
+                    }
                 }
                 is ScannerViewModel.AppState.InventoryResult -> {
                     InventoryResultView(currentState = currentState, viewModel = viewModel)
@@ -522,29 +653,52 @@ fun AutoResetCountdown(durationMillis: Long, message: String, resetTrigger: Any?
 fun ReadyToScanBox(
     width: androidx.compose.ui.unit.Dp = 280.dp,
     height: androidx.compose.ui.unit.Dp = 180.dp,
-    fontSize: androidx.compose.ui.unit.TextUnit = 24.sp
+    fontSize: androidx.compose.ui.unit.TextUnit = 24.sp,
+    // Set when scanning with the camera: tapping the box turns it into the live camera
+    onCameraScan: ((String) -> Unit)? = null,
+    // Camera already on when the box appears; [onCameraStopped] runs if it is turned off unused
+    autoStartCamera: Boolean = false,
+    onCameraStopped: () -> Unit = {},
+    // Each emission turns the box's camera on or off (volume buttons)
+    cameraToggles: Flow<Unit>? = null
+) {
+    if (onCameraScan == null) {
+        ScanBoxFrame(width, height) {
+            Text(text = "Ready to Scan", fontSize = fontSize, fontWeight = FontWeight.SemiBold, color = Color.White)
+        }
+    } else {
+        InlineCameraScan(
+            onScan = onCameraScan,
+            width = width,
+            height = height,
+            modifier = Modifier.padding(24.dp),
+            autoStart = autoStartCamera,
+            onStopped = onCameraStopped,
+            toggles = cameraToggles
+        ) { start ->
+            ScanBoxFrame(width, height, padded = false, onClick = start) {
+                Text(text = "Tap to Scan", fontSize = fontSize, fontWeight = FontWeight.SemiBold, color = Color.White)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScanBoxFrame(
+    width: androidx.compose.ui.unit.Dp,
+    height: androidx.compose.ui.unit.Dp,
+    padded: Boolean = true,
+    onClick: (() -> Unit)? = null,
+    content: @Composable () -> Unit
 ) {
     Box(
         modifier = Modifier
-            .padding(24.dp)
+            .then(if (padded) Modifier.padding(24.dp) else Modifier)
             .size(width = width, height = height)
-            .drawBehind {
-                val strokeWidthPx = 4.dp.toPx()
-                val cornerLengthPx = (width.toPx() * 0.15f).coerceAtLeast(20.dp.toPx())
-                val bracketColor = Color.White.copy(alpha = 0.7f)
-                val w = size.width
-                val h = size.height
-                drawLine(bracketColor, Offset(0f, 0f), Offset(cornerLengthPx, 0f), strokeWidthPx)
-                drawLine(bracketColor, Offset(0f, 0f), Offset(0f, cornerLengthPx), strokeWidthPx)
-                drawLine(bracketColor, Offset(w, 0f), Offset(w - cornerLengthPx, 0f), strokeWidthPx)
-                drawLine(bracketColor, Offset(w, 0f), Offset(w, cornerLengthPx), strokeWidthPx)
-                drawLine(bracketColor, Offset(0f, h), Offset(cornerLengthPx, h), strokeWidthPx)
-                drawLine(bracketColor, Offset(0f, h), Offset(0f, h - cornerLengthPx), strokeWidthPx)
-                drawLine(bracketColor, Offset(w, h), Offset(w - cornerLengthPx, h), strokeWidthPx)
-                drawLine(bracketColor, Offset(w, h), Offset(w, h - cornerLengthPx), strokeWidthPx)
-            },
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .scanCornerBrackets(width),
         contentAlignment = Alignment.Center
     ) {
-        Text(text = "Ready to Scan", fontSize = fontSize, fontWeight = FontWeight.SemiBold, color = Color.White)
+        content()
     }
 }

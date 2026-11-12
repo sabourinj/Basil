@@ -6,6 +6,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.ui.text.style.TextOverflow
 import com.basil.grocyscanner.data.GeminiModelOption
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -18,6 +22,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -25,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoveDown
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenuItem
@@ -75,38 +82,48 @@ import com.basil.grocyscanner.ui.theme.ErrorRed
 import com.basil.grocyscanner.ui.theme.SuccessGreen
 import com.basil.grocyscanner.viewmodel.ScannerViewModel
 import com.mikepenz.aboutlibraries.Libs
-import com.mikepenz.aboutlibraries.ui.compose.m3.LibrariesContainer
 import com.mikepenz.aboutlibraries.util.withContext
 
 /**
  * First-run setup layout: the Basil logo and name across the top, with the
- * step's own content (Grocy or Gemini) centered in the space below it.
+ * step's own content (scanner choice, Grocy or Gemini) centered in the space
+ * below it. With [onBack], a back arrow sits in the top corner.
  */
 @Composable
-private fun SetupScaffold(content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Spacer(modifier = Modifier.height(24.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(text = "Basil", style = MaterialTheme.typography.headlineLarge, color = Color.White, fontWeight = FontWeight.Bold)
-            Image(painter = painterResource(id = R.drawable.basil_logo), contentDescription = "Basil Logo", modifier = Modifier.size(56.dp))
-        }
-
+internal fun SetupScaffold(onBack: (() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
+    // Basil draws edge to edge, so keep clear of the status bar and any camera cutout
+    BoxWithConstraints(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+        // Taller screens get more room above the logo; short ones keep the minimum
+        val topGap = (maxHeight * 0.08f).coerceIn(24.dp, 96.dp)
         Column(
-            modifier = Modifier.fillMaxWidth().weight(1f),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            content = content
-        )
+            modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp).padding(bottom = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(modifier = Modifier.height(topGap))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(text = "Basil", style = MaterialTheme.typography.headlineLarge, color = Color.White, fontWeight = FontWeight.Bold)
+                Image(painter = painterResource(id = R.drawable.basil_logo), contentDescription = "Basil Logo", modifier = Modifier.size(56.dp))
+            }
+
+            Column(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                content = content
+            )
+        }
+        onBack?.let {
+            IconButton(onClick = it, modifier = Modifier.align(Alignment.TopStart).padding(8.dp)) {
+                Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+            }
+        }
     }
 }
 
 private val GEMINI_LOGO_SIZE = 80.dp
 
 @Composable
-fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
+fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit, onCameraScan: ((String) -> Unit)? = null) {
     var step by remember { mutableIntStateOf(1) }
 
     SetupScaffold {
@@ -142,6 +159,7 @@ fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
             Text("API Key Required", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(16.dp))
             Text("1. Create a Gemini API Key.\n2. Generate a QR code for the key.\n3. Scan the QR Code.", textAlign = TextAlign.Left, color = Color.LightGray)
+            onCameraScan?.let { SetupScanButton(it) }
             Spacer(modifier = Modifier.height(48.dp))
             TextButton(onClick = onSkip) { Text("Skip for now", color = Color.LightGray) }
         }
@@ -149,12 +167,29 @@ fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit) {
 }
 
 @Composable
-fun UnconfiguredScreen() {
-    SetupScaffold {
+fun UnconfiguredScreen(onCameraScan: ((String) -> Unit)? = null, onBack: (() -> Unit)? = null) {
+    SetupScaffold(onBack = onBack) {
         Image(painter = painterResource(id = R.drawable.grocy_logo), contentDescription = "Grocy Logo", modifier = Modifier.size(180.dp))
         Text("API Key Required", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(16.dp))
         Text("1. Generate an API Key in Grocy.\n2. Click the Show QR Code button.\n3. Scan the QR code displayed.", textAlign = TextAlign.Left, color = Color.LightGray)
+        onCameraScan?.let { SetupScanButton(it) }
+    }
+}
+
+/**
+ * A "Scan QR Code" button that turns into the camera in the same spot; shown
+ * only when scanning with the camera.
+ */
+@Composable
+private fun SetupScanButton(onScan: (String) -> Unit) {
+    Spacer(modifier = Modifier.height(32.dp))
+    InlineCameraScan(onScan = onScan, width = 280.dp, height = 180.dp) { start ->
+        Button(onClick = start, colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = DeepPurple)) {
+            Icon(imageVector = Icons.Filled.PhotoCamera, contentDescription = null, modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.width(12.dp))
+            Text("Scan QR Code", fontWeight = FontWeight.Bold)
+        }
     }
 }
 
@@ -176,6 +211,23 @@ fun RowScope.ModeButton(title: String, isSelected: Boolean, onClick: () -> Unit)
     }
 }
 
+/** A Settings row with a label and an on/off switch, styled like Enable Gemini AI. */
+@Composable
+private fun SettingsSwitchRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(0.8f),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, style = MaterialTheme.typography.titleMedium, color = Color.White)
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(checkedThumbColor = DeepPurple, checkedTrackColor = Color.LightGray)
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -186,6 +238,13 @@ fun SettingsScreen(
     loadGeminiModels: suspend () -> List<GeminiModelOption>,
     resetDurationSeconds: Int,
     onResetDurationChange: (Int) -> Unit,
+    isSoundEnabled: Boolean,
+    onToggleSound: (Boolean) -> Unit,
+    isVibrationEnabled: Boolean,
+    onToggleVibration: (Boolean) -> Unit,
+    // Null hides the switch (hardware scanner devices)
+    isVolumeScanEnabled: Boolean?,
+    onToggleVolumeScan: (Boolean) -> Unit,
     viewModel: ScannerViewModel,
     onStartBatchMove: (Int, String) -> Unit,
     onLogout: () -> Unit,
@@ -262,6 +321,15 @@ fun SettingsScreen(
                         modifier = Modifier.padding(start = 16.dp)
                     )
                 }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            SettingsSwitchRow("Sounds", isSoundEnabled, onToggleSound)
+            Spacer(modifier = Modifier.height(8.dp))
+            SettingsSwitchRow("Vibration", isVibrationEnabled, onToggleVibration)
+            isVolumeScanEnabled?.let {
+                Spacer(modifier = Modifier.height(8.dp))
+                SettingsSwitchRow("Volume Buttons Scan", it, onToggleVolumeScan)
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -388,55 +456,46 @@ fun SettingsScreen(
                         }
                     }
 
+                    // Generated at build time by the AboutLibraries plugin from Basil's
+                    // dependencies; the hand-kept list only covers a build without it
                     val context = LocalContext.current
-                    val libs = remember(context) {
-                        try {
-                            Libs.Builder().withContext(context).build()
+                    val credits = remember(context) {
+                        val generated = try {
+                            Libs.Builder().withContext(context).build().libraries
                         } catch (_: Exception) {
-                            null
+                            emptyList()
+                        }
+                        if (generated.isEmpty()) {
+                            FALLBACK_CREDITS
+                        } else {
+                            generated
+                                .map { lib ->
+                                    Credit(
+                                        // Some Google libraries are named only "common" or "image":
+                                        // show their full ID so it's clear what they are
+                                        name = if (lib.name == lib.uniqueId.substringAfter(':')) lib.uniqueId else lib.name,
+                                        license = lib.licenses.joinToString { it.name }.ifBlank { "License not listed" },
+                                        version = lib.artifactVersion
+                                    )
+                                }
+                                .distinctBy { it.name to it.version }
+                                .sortedBy { it.name.lowercase() }
                         }
                     }
 
-                    if (libs != null && (libs.libraries.isNotEmpty() || libs.licenses.isNotEmpty())) {
-                        MaterialTheme(
-                            colorScheme = MaterialTheme.colorScheme,
-                            typography = MaterialTheme.typography.copy(
-                                titleLarge = MaterialTheme.typography.titleLarge.copy(fontSize = 16.sp), // Library Names
-                                bodyMedium = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp), // Library Descriptions
-                                bodySmall = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),   // Version Numbers
-                                labelLarge = MaterialTheme.typography.labelLarge.copy(fontSize = 10.sp)  // License Badges
-                            )
-                        ) {
-                            LibrariesContainer(
-                                libraries = libs,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-                    } else {
-                        Column(
-                            modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()),
-                            horizontalAlignment = Alignment.Start
-                        ) {
-                            Text("Open Source Libraries", style = MaterialTheme.typography.titleMedium, color = Color.Black, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            val manualLibs = listOf(
-                                "Jetpack Compose" to "Apache 2.0",
-                                "Material Design 3" to "Apache 2.0",
-                                "Retrofit" to "Apache 2.0",
-                                "OkHttp" to "Apache 2.0",
-                                "Coil" to "Apache 2.0",
-                                "Google Gemini AI" to "Apache 2.0",
-                                "AboutLibraries" to "Apache 2.0",
-                                "Kotlin Coroutines" to "Apache 2.0",
-                                "Gson" to "Apache 2.0"
-                            )
-
-                            manualLibs.forEach { (name, license) ->
-                                Column(modifier = Modifier.padding(vertical = 8.dp)) {
-                                    Text(name, fontWeight = FontWeight.Bold, color = Color.Black, fontSize = 14.sp)
-                                    Text(license, style = MaterialTheme.typography.bodySmall, color = Color.DarkGray)
-                                }
+                    // The dialog's own title already heads this list
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 24.dp)
+                    ) {
+                        items(credits) { credit ->
+                            Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                                Text(credit.name, fontWeight = FontWeight.Bold, color = Color.Black, fontSize = 14.sp)
+                                Text(
+                                    listOfNotNull(credit.license, credit.version).joinToString(" · "),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.DarkGray
+                                )
                             }
                         }
                     }
@@ -532,3 +591,24 @@ fun BatchMoveModal(
         }
     }
 }
+
+/** One row of the Open Source Licenses window. */
+private data class Credit(val name: String, val license: String, val version: String? = null)
+
+// Shown only if the generated list is missing. Keep in step with app/build.gradle.kts.
+private val FALLBACK_CREDITS = listOf(
+    Credit("AboutLibraries", "Apache 2.0"),
+    Credit("AndroidX Security", "Apache 2.0"),
+    Credit("CameraX", "Apache 2.0"),
+    Credit("Coil", "Apache 2.0"),
+    Credit("Google Gemini AI", "Apache 2.0"),
+    Credit("Gson", "Apache 2.0"),
+    Credit("Jetpack Compose", "Apache 2.0"),
+    Credit("Kotlin Coroutines", "Apache 2.0"),
+    Credit("Material Design 3", "Apache 2.0"),
+    Credit("ML Kit Barcode Scanning", "ML Kit Terms of Service"),
+    Credit("OkHttp", "Apache 2.0"),
+    Credit("Retrofit", "Apache 2.0"),
+    Credit("WorkManager", "Apache 2.0"),
+    Credit("ZXing", "Apache 2.0")
+)
