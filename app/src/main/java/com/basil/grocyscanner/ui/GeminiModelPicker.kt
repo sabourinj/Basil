@@ -85,7 +85,7 @@ fun GeminiModelPicker(
                 Text("Gemini Model", style = MaterialTheme.typography.headlineSmall, color = Color.White, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    "Used for every Gemini call in Basil. Set your parent script to the same model.",
+                    "Used for every Gemini call in Basil.",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color.LightGray
                 )
