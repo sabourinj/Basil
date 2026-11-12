@@ -109,8 +109,8 @@ fun GeminiModelPicker(
                             Column {
                                 Text(option.label, style = MaterialTheme.typography.bodyLarge, color = Color.White)
                                 val detail = when (option.id) {
-                                    GeminiConfig.LATEST_FLASH_ALIAS -> "Follows Google's newest Flash. Can change without notice."
-                                    GeminiConfig.DEFAULT_MODEL -> "${option.id} · default"
+                                    // The default (see GeminiConfig.DEFAULT_MODEL)
+                                    GeminiConfig.LATEST_FLASH_ALIAS -> "Default. Follows Google's newest Flash, so it can change without notice."
                                     else -> option.id.takeIf { it != option.label }
                                 }
                                 detail?.let {
