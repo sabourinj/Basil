@@ -24,6 +24,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -63,6 +64,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -83,6 +91,7 @@ import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.hypot
@@ -148,7 +157,7 @@ fun rememberCameraPermission(onGranted: () -> Unit): () -> Unit {
  *
  * With [autoStart], the camera is already on when the area appears (if access
  * was granted before). [onStopped] runs when the camera turns off without a
- * scan: its X was tapped or it timed out.
+ * scan: its X was tapped, it timed out, or a [toggles] emission turned it off.
  */
 @Composable
 fun InlineCameraScan(
@@ -158,6 +167,7 @@ fun InlineCameraScan(
     modifier: Modifier = Modifier,
     autoStart: Boolean = false,
     onStopped: () -> Unit = {},
+    toggles: Flow<Unit>? = null,
     idle: @Composable (start: () -> Unit) -> Unit
 ) {
     val context = LocalContext.current
@@ -167,9 +177,16 @@ fun InlineCameraScan(
         )
     }
     val start = rememberCameraPermission { active = true }
+    val currentOnStopped by rememberUpdatedState(onStopped)
     val stop = {
         active = false
-        onStopped()
+        currentOnStopped()
+    }
+    // Volume buttons: each press turns the camera on or off
+    if (toggles != null) {
+        LaunchedEffect(toggles) {
+            toggles.collect { if (active) stop() else start() }
+        }
     }
 
     if (active) {
@@ -206,10 +223,11 @@ fun InlineCameraScan(
 /**
  * Returns a function that opens a small pop-up viewfinder, for scan buttons
  * that have no "Tap to Scan" area beside them. The first code read goes to
- * [onScan] and the pop-up closes.
+ * [onScan] and the pop-up closes. With [closeOnVolumeKeys], a volume button
+ * press closes it too (the pop-up is its own window, so it gets those presses).
  */
 @Composable
-fun rememberCameraScanner(onScan: (String) -> Unit): () -> Unit {
+fun rememberCameraScanner(onScan: (String) -> Unit, closeOnVolumeKeys: Boolean = false): () -> Unit {
     var showScanner by remember { mutableStateOf(false) }
     val currentOnScan by rememberUpdatedState(onScan)
 
@@ -219,7 +237,8 @@ fun rememberCameraScanner(onScan: (String) -> Unit): () -> Unit {
                 showScanner = false
                 currentOnScan(code)
             },
-            onDismiss = { showScanner = false }
+            onDismiss = { showScanner = false },
+            closeOnVolumeKeys = closeOnVolumeKeys
         )
     }
 
@@ -269,17 +288,33 @@ fun Modifier.scanCornerBrackets(boxWidth: Dp, color: Color = Color.White.copy(al
 
 /** Pop-up card holding a viewfinder the size of the "Tap to Scan" box, over a dimmed screen. */
 @Composable
-private fun CameraScanCard(onResult: (String) -> Unit, onDismiss: () -> Unit) {
+private fun CameraScanCard(onResult: (String) -> Unit, onDismiss: () -> Unit, closeOnVolumeKeys: Boolean) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         LaunchedEffect(Unit) {
             delay(VIEWFINDER_TIMEOUT_MS)
             onDismiss()
         }
+        // Volume buttons close the pop-up, the same press that would have opened it
+        val focusRequester = remember { FocusRequester() }
+        if (closeOnVolumeKeys) {
+            LaunchedEffect(Unit) { focusRequester.requestFocus() }
+        }
         Column(
             modifier = Modifier
                 .fillMaxWidth(0.88f)
                 .background(DeepPurple, RoundedCornerShape(16.dp))
-                .padding(16.dp),
+                .padding(16.dp)
+                .then(
+                    if (!closeOnVolumeKeys) Modifier
+                    else Modifier
+                        .onPreviewKeyEvent { event ->
+                            if (event.key != Key.VolumeUp && event.key != Key.VolumeDown) return@onPreviewKeyEvent false
+                            if (event.type == KeyEventType.KeyDown && event.nativeKeyEvent.repeatCount == 0) onDismiss()
+                            true // consumed, so the volume doesn't change
+                        }
+                        .focusRequester(focusRequester)
+                        .focusable()
+                ),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Box(

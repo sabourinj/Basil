@@ -60,6 +60,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -93,7 +95,9 @@ fun GrocyScannerApp(
     onCameraScan: ((String) -> Unit)? = null,
     // The Sounds and Vibration settings
     soundEnabled: Boolean = true,
-    vibrationEnabled: Boolean = true
+    vibrationEnabled: Boolean = true,
+    // Volume-button presses that turn the camera on or off; null when not in use
+    cameraTriggers: Flow<Unit>? = null
 ) {
     val state by viewModel.state.collectAsState()
     val currentMode by viewModel.currentMode.collectAsState()
@@ -125,8 +129,31 @@ fun GrocyScannerApp(
     }
 
     // Scan buttons with no "Tap to Scan" box beside them open a pop-up viewfinder
-    val openCameraPopup = rememberCameraScanner { cameraScan?.invoke(it) }
+    val openCameraPopup = rememberCameraScanner(
+        onScan = { cameraScan?.invoke(it) },
+        closeOnVolumeKeys = cameraTriggers != null
+    )
     val openCameraCard: (() -> Unit)? = if (onCameraScan != null) openCameraPopup else null
+
+    // Volume buttons: switch the "Tap to Scan" box's camera where there is one,
+    // otherwise open the pop-up camera. Ignored while busy or under a prompt.
+    val boxCameraToggles = remember { MutableSharedFlow<Unit>(extraBufferCapacity = 1) }
+    val latestState by rememberUpdatedState(state)
+    val latestOpenCameraCard by rememberUpdatedState(openCameraCard)
+    LaunchedEffect(cameraTriggers) {
+        cameraTriggers?.collect {
+            when (latestState) {
+                is ScannerViewModel.AppState.Idle,
+                is ScannerViewModel.AppState.BatchMoveActive -> boxCameraToggles.tryEmit(Unit)
+                is ScannerViewModel.AppState.Success,
+                is ScannerViewModel.AppState.InventoryResult,
+                is ScannerViewModel.AppState.LinkingChild,
+                is ScannerViewModel.AppState.Error,
+                is ScannerViewModel.AppState.ShoppingList -> latestOpenCameraCard?.invoke()
+                else -> {}
+            }
+        }
+    }
 
     val systemVibrator = remember {
         val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
@@ -353,7 +380,7 @@ fun GrocyScannerApp(
         ) {
             when (val currentState = state) {
                 is ScannerViewModel.AppState.Idle -> {
-                    ReadyToScanBox(onCameraScan = cameraScan)
+                    ReadyToScanBox(onCameraScan = cameraScan, cameraToggles = boxCameraToggles)
                 }
                 is ScannerViewModel.AppState.BatchMoveActive -> {
                     Icon(imageVector = Icons.Default.MoveDown, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(64.dp))
@@ -366,7 +393,8 @@ fun GrocyScannerApp(
                         width = 220.dp, height = 130.dp, fontSize = 18.sp,
                         onCameraScan = cameraScan,
                         autoStartCamera = keepTransferCameraOn,
-                        onCameraStopped = { keepTransferCameraOn = false }
+                        onCameraStopped = { keepTransferCameraOn = false },
+                        cameraToggles = boxCameraToggles
                     )
                 }
                 is ScannerViewModel.AppState.Loading -> {
@@ -589,7 +617,9 @@ fun ReadyToScanBox(
     onCameraScan: ((String) -> Unit)? = null,
     // Camera already on when the box appears; [onCameraStopped] runs if it is turned off unused
     autoStartCamera: Boolean = false,
-    onCameraStopped: () -> Unit = {}
+    onCameraStopped: () -> Unit = {},
+    // Each emission turns the box's camera on or off (volume buttons)
+    cameraToggles: Flow<Unit>? = null
 ) {
     if (onCameraScan == null) {
         ScanBoxFrame(width, height) {
@@ -602,7 +632,8 @@ fun ReadyToScanBox(
             height = height,
             modifier = Modifier.padding(24.dp),
             autoStart = autoStartCamera,
-            onStopped = onCameraStopped
+            onStopped = onCameraStopped,
+            toggles = cameraToggles
         ) { start ->
             ScanBoxFrame(width, height, padded = false, onClick = start) {
                 Text(text = "Tap to Scan", fontSize = fontSize, fontWeight = FontWeight.SemiBold, color = Color.White)

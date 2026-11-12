@@ -241,6 +241,9 @@ fun SettingsScreen(
     onToggleSound: (Boolean) -> Unit,
     isVibrationEnabled: Boolean,
     onToggleVibration: (Boolean) -> Unit,
+    // Null hides the switch (hardware scanner devices)
+    isVolumeScanEnabled: Boolean?,
+    onToggleVolumeScan: (Boolean) -> Unit,
     viewModel: ScannerViewModel,
     onStartBatchMove: (Int, String) -> Unit,
     onLogout: () -> Unit,
@@ -323,6 +326,10 @@ fun SettingsScreen(
             SettingsSwitchRow("Sounds", isSoundEnabled, onToggleSound)
             Spacer(modifier = Modifier.height(8.dp))
             SettingsSwitchRow("Vibration", isVibrationEnabled, onToggleVibration)
+            isVolumeScanEnabled?.let {
+                Spacer(modifier = Modifier.height(8.dp))
+                SettingsSwitchRow("Volume Buttons Scan", it, onToggleVolumeScan)
+            }
 
             Spacer(modifier = Modifier.height(16.dp))
 

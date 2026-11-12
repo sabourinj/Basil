@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Bundle
+import android.view.KeyEvent
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +48,7 @@ import com.basil.grocyscanner.work.EnrichmentScheduler
 import com.basil.grocyscanner.data.GeminiConfig
 import com.basil.grocyscanner.data.GeminiModels
 import com.basil.grocyscanner.data.SecurePrefs
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
@@ -59,6 +62,28 @@ import java.util.concurrent.TimeUnit
 class MainActivity : ComponentActivity() {
 
     private var viewModel by mutableStateOf<ScannerViewModel?>(null)
+
+    // While scanning with the camera, either volume button turns the camera on or off.
+    // Set from Compose: only on the scanner screen, in camera mode, with the setting on.
+    @Volatile private var volumeKeysScan = false
+    private val cameraTriggers = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    private fun isVolumeKey(keyCode: Int) =
+        keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (volumeKeysScan && isVolumeKey(keyCode)) {
+            // One press, one toggle, even if the button is held
+            if (event.repeatCount == 0) cameraTriggers.tryEmit(Unit)
+            return true // consumed, so the volume doesn't change
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (volumeKeysScan && isVolumeKey(keyCode)) return true
+        return super.onKeyUp(keyCode, event)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
@@ -89,6 +114,7 @@ class MainActivity : ComponentActivity() {
                 // Scan sounds and vibration, both on unless turned off in Settings
                 var soundEnabled by remember { mutableStateOf(sharedPrefs.getBoolean("SOUND_ENABLED", true)) }
                 var vibrationEnabled by remember { mutableStateOf(sharedPrefs.getBoolean("VIBRATION_ENABLED", true)) }
+                var volumeScanEnabled by remember { mutableStateOf(sharedPrefs.getBoolean("VOLUME_KEY_SCAN", true)) }
                 var geminiModelState by remember { mutableStateOf(GeminiConfig.model(sharedPrefs)) }
 
                 val hasCamera = remember { CameraScanning.hasCamera(this) }
@@ -169,6 +195,8 @@ class MainActivity : ComponentActivity() {
                     // Camera scans feed the same path as the hardware scanner
                     val onCameraScan: ((String) -> Unit)? =
                         if (cameraScanEnabled) { code -> handleScan(code, fromHardware = false) } else null
+                    val volumeKeysActive = cameraScanEnabled && volumeScanEnabled && currentScreen == "scanner"
+                    SideEffect { volumeKeysScan = volumeKeysActive }
 
                     DisposableEffect(lifecycleOwner, currentScreen) {
                         val receiver = object : BroadcastReceiver() {
@@ -223,7 +251,8 @@ class MainActivity : ComponentActivity() {
                                 onNavigateToSettings = { currentScreen = "settings" },
                                 onCameraScan = onCameraScan,
                                 soundEnabled = soundEnabled,
-                                vibrationEnabled = vibrationEnabled
+                                vibrationEnabled = vibrationEnabled,
+                                cameraTriggers = if (volumeKeysActive) cameraTriggers else null
                             )
                         }
                         "settings" -> {
@@ -275,6 +304,12 @@ class MainActivity : ComponentActivity() {
                                     vibrationEnabled = enabled
                                     sharedPrefs.edit { putBoolean("VIBRATION_ENABLED", enabled) }
                                 },
+                                // Only offered when scanning with the camera
+                                isVolumeScanEnabled = if (cameraScanEnabled) volumeScanEnabled else null,
+                                onToggleVolumeScan = { enabled ->
+                                    volumeScanEnabled = enabled
+                                    sharedPrefs.edit { putBoolean("VOLUME_KEY_SCAN", enabled) }
+                                },
                                 viewModel = currentVm!!,
                                 onStartBatchMove = { locId, locName ->
                                     currentVm.startBatchMove(locId, locName)
@@ -292,6 +327,7 @@ class MainActivity : ComponentActivity() {
                                     resetDurationSeconds = 4
                                     soundEnabled = true
                                     vibrationEnabled = true
+                                    volumeScanEnabled = true
                                     geminiModelState = GeminiConfig.DEFAULT_MODEL
                                     cameraScanEnabled = false
                                     currentScreen = if (hasCamera) "scanner_choice" else "unconfigured"
