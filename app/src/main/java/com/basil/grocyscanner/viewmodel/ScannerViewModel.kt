@@ -359,6 +359,40 @@ class ScannerViewModel(
         }
     }
 
+    // Removes every checked-off row from the shopping list (after the user confirms)
+    fun clearCompletedShoppingItems() {
+        val state = _state.value as? AppState.ShoppingList ?: return
+        if (state.items.none { isItemDone(it) }) return
+        viewModelScope.launch {
+            shoppingMutex.withLock {
+                (_state.value as? AppState.ShoppingList)?.let {
+                    _state.value = it.copy(isProcessing = true, processingLabel = "Clearing completed items…")
+                }
+                try {
+                    // Fresh from Grocy, in case the list changed since it was drawn
+                    val done = api.getShoppingList().filter { isItemDone(it) }
+                    done.forEach { api.deleteShoppingListItem(it.id) }
+
+                    val items = enrichListItems(api.getShoppingList(), api.getProducts())
+                    val current = _state.value as? AppState.ShoppingList
+                    _state.value = AppState.ShoppingList(
+                        items = items,
+                        sheet = current?.sheet,
+                        addNextScan = armedForAdd(),
+                        notice = if (done.size == 1) "Cleared 1 completed item" else "Cleared ${done.size} completed items"
+                    )
+                } catch (e: HttpException) {
+                    // Some rows may be gone already: redraw, then show the error.
+                    fetchShoppingList()
+                    flagShoppingScanError("HTTP ${e.code()}: Couldn't clear completed items", e)
+                } catch (e: Exception) {
+                    Log.e("BasilDebug", "Clear completed failed", e)
+                    flagShoppingScanError("Connection Error: Couldn't clear completed items", e)
+                }
+            }
+        }
+    }
+
     fun clearShoppingNotice(notice: String) {
         val state = _state.value as? AppState.ShoppingList ?: return
         if (state.notice == notice) _state.value = state.copy(notice = null)
@@ -534,8 +568,16 @@ class ScannerViewModel(
                 try {
                     api.undoTransaction(purchase.transactionId)
                     purchase.stockId?.let { enrichment?.cancelStockEntryFix(it) }
-                    purchase.listItemBefore?.let {
-                        api.updateShoppingListItem(it.id, mapOf("amount" to it.amount, "done" to 0))
+                    purchase.listItemBefore?.let { before ->
+                        try {
+                            api.updateShoppingListItem(before.id, mapOf("amount" to before.amount, "done" to 0))
+                        } catch (e: HttpException) {
+                            // The row is gone (e.g. "Clear completed" removed it): put it back.
+                            Log.w("BasilDebug", "List row ${before.id} missing on undo: HTTP ${e.code()}")
+                            before.product_id?.let { productId ->
+                                api.addToShoppingList(AddToShoppingListRequest(product_id = productId, amount = before.amount.toInt().coerceAtLeast(1)))
+                            }
+                        }
                     }
                     lastShoppingPurchase = null
 
