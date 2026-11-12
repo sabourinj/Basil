@@ -76,6 +76,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.window.Dialog
 import com.basil.grocyscanner.R
 import com.basil.grocyscanner.ui.theme.DarkerHeaderPurple
@@ -444,6 +446,7 @@ fun GrocyScannerApp(
                         animationSpec = infiniteRepeatable(animation = tween(400, easing = LinearEasing), repeatMode = RepeatMode.Reverse),
                         label = "blinkAlpha"
                     )
+                    var showQuantityPrompt by remember { mutableStateOf(false) }
 
                     Text(currentState.message, style = MaterialTheme.typography.headlineMedium, color = SuccessGreen, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold)
 
@@ -461,7 +464,25 @@ fun GrocyScannerApp(
                         val prodId = currentState.product.id
                         if (currentMode == AppMode.PURCHASE && currentState.currentStock > 0.0) {
                             Spacer(modifier = Modifier.height(32.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                // How many identical items were bought; only for a fresh purchase
+                                // (a linked multipack has no single stock entry to change)
+                                if (currentState.stockId != null) {
+                                    FilledIconButton(
+                                        onClick = { showQuantityPrompt = true },
+                                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White, contentColor = DeepPurple),
+                                        modifier = Modifier.size(64.dp)
+                                    ) {
+                                        val qty = currentState.addedAmount
+                                        Text(
+                                            text = "×" + (if (qty % 1.0 == 0.0) qty.toInt().toString() else qty.toString()),
+                                            fontSize = 20.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.semantics { contentDescription = "Change quantity" }
+                                        )
+                                    }
+                                }
+
                                 FilledIconButton(
                                     onClick = { viewModel.performQuickAction(prodId, "print", currentState.stockId, currentState.addedAmount) },
                                     colors = IconButtonDefaults.filledIconButtonColors(
@@ -521,12 +542,32 @@ fun GrocyScannerApp(
                     }
 
                     Spacer(modifier = Modifier.height(32.dp))
-                    AutoResetCountdown(
-                        durationMillis = resetDurationSeconds * 1000L,
-                        message = if (currentMode == AppMode.BATCH_MOVE) "Ready for Next..." else "Ready to Scan...",
-                        resetTrigger = currentState,
-                        onTimeout = { viewModel.resetState() }
-                    )
+                    // Paused while the quantity prompt is open, so the result screen waits for it
+                    if (!showQuantityPrompt) {
+                        AutoResetCountdown(
+                            durationMillis = resetDurationSeconds * 1000L,
+                            message = if (currentMode == AppMode.BATCH_MOVE) "Ready for Next..." else "Ready to Scan...",
+                            resetTrigger = currentState,
+                            onTimeout = { viewModel.resetState() }
+                        )
+                    }
+
+                    val quantityStockId = currentState.stockId
+                    if (showQuantityPrompt && currentState.product != null && quantityStockId != null) {
+                        QuantityPrompt(
+                            title = "Quantity Purchased",
+                            question = "How many of this item did you buy?",
+                            product = currentState.product,
+                            initialQuantity = currentState.addedAmount,
+                            presets = listOf(2.0, 3.0, 4.0, 6.0),
+                            confirmLabel = "Save",
+                            onConfirm = { total ->
+                                showQuantityPrompt = false
+                                viewModel.setPurchaseQuantity(quantityStockId, total)
+                            },
+                            onCancel = { showQuantityPrompt = false }
+                        )
+                    }
                 }
                 is ScannerViewModel.AppState.InventoryResult -> {
                     InventoryResultView(currentState = currentState, viewModel = viewModel)
