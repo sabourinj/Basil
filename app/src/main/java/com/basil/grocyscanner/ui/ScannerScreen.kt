@@ -95,8 +95,21 @@ fun GrocyScannerApp(
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
 
+    // Transfer Mode: once an item is scanned with the camera, the camera turns itself
+    // back on for the next one, until its X is tapped, it times out, or the mode ends
+    var keepTransferCameraOn by remember { mutableStateOf(false) }
+    LaunchedEffect(currentMode) {
+        if (currentMode != AppMode.BATCH_MOVE) keepTransferCameraOn = false
+    }
+    val cameraScan: ((String) -> Unit)? = onCameraScan?.let { sink ->
+        { code: String ->
+            if (currentMode == AppMode.BATCH_MOVE) keepTransferCameraOn = true
+            sink(code)
+        }
+    }
+
     // Scan buttons with no "Tap to Scan" box beside them open a pop-up viewfinder
-    val openCameraPopup = rememberCameraScanner { onCameraScan?.invoke(it) }
+    val openCameraPopup = rememberCameraScanner { cameraScan?.invoke(it) }
     val openCameraCard: (() -> Unit)? = if (onCameraScan != null) openCameraPopup else null
 
     val vibrator = remember {
@@ -321,7 +334,7 @@ fun GrocyScannerApp(
         ) {
             when (val currentState = state) {
                 is ScannerViewModel.AppState.Idle -> {
-                    ReadyToScanBox(onCameraScan = onCameraScan)
+                    ReadyToScanBox(onCameraScan = cameraScan)
                 }
                 is ScannerViewModel.AppState.BatchMoveActive -> {
                     Icon(imageVector = Icons.Default.MoveDown, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(64.dp))
@@ -329,7 +342,13 @@ fun GrocyScannerApp(
                     Text("Transferring to:", style = MaterialTheme.typography.titleMedium, color = Color.LightGray)
                     Text(text = currentState.locationName, style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                     Spacer(modifier = Modifier.height(24.dp))
-                    ReadyToScanBox(width = 220.dp, height = 130.dp, fontSize = 18.sp, onCameraScan = onCameraScan)
+                    // After a camera scan, the camera is back on for the next item
+                    ReadyToScanBox(
+                        width = 220.dp, height = 130.dp, fontSize = 18.sp,
+                        onCameraScan = cameraScan,
+                        autoStartCamera = keepTransferCameraOn,
+                        onCameraStopped = { keepTransferCameraOn = false }
+                    )
                 }
                 is ScannerViewModel.AppState.Loading -> {
                     Box(contentAlignment = Alignment.Center) {
@@ -548,14 +567,24 @@ fun ReadyToScanBox(
     height: androidx.compose.ui.unit.Dp = 180.dp,
     fontSize: androidx.compose.ui.unit.TextUnit = 24.sp,
     // Set when scanning with the camera: tapping the box turns it into the live camera
-    onCameraScan: ((String) -> Unit)? = null
+    onCameraScan: ((String) -> Unit)? = null,
+    // Camera already on when the box appears; [onCameraStopped] runs if it is turned off unused
+    autoStartCamera: Boolean = false,
+    onCameraStopped: () -> Unit = {}
 ) {
     if (onCameraScan == null) {
         ScanBoxFrame(width, height) {
             Text(text = "Ready to Scan", fontSize = fontSize, fontWeight = FontWeight.SemiBold, color = Color.White)
         }
     } else {
-        InlineCameraScan(onScan = onCameraScan, width = width, height = height, modifier = Modifier.padding(24.dp)) { start ->
+        InlineCameraScan(
+            onScan = onCameraScan,
+            width = width,
+            height = height,
+            modifier = Modifier.padding(24.dp),
+            autoStart = autoStartCamera,
+            onStopped = onCameraStopped
+        ) { start ->
             ScanBoxFrame(width, height, padded = false, onClick = start) {
                 Text(text = "Tap to Scan", fontSize = fontSize, fontWeight = FontWeight.SemiBold, color = Color.White)
             }

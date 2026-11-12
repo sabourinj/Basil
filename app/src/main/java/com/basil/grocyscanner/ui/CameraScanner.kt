@@ -145,6 +145,10 @@ fun rememberCameraPermission(onGranted: () -> Unit): () -> Unit {
  * A "Tap to Scan" area that becomes the live camera in place. [idle] draws the
  * area while the camera is off and is handed the function that turns it on.
  * The first code read goes to [onScan] and the camera turns off again.
+ *
+ * With [autoStart], the camera is already on when the area appears (if access
+ * was granted before). [onStopped] runs when the camera turns off without a
+ * scan: its X was tapped or it timed out.
  */
 @Composable
 fun InlineCameraScan(
@@ -152,15 +156,26 @@ fun InlineCameraScan(
     width: Dp,
     height: Dp,
     modifier: Modifier = Modifier,
+    autoStart: Boolean = false,
+    onStopped: () -> Unit = {},
     idle: @Composable (start: () -> Unit) -> Unit
 ) {
-    var active by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    var active by remember {
+        mutableStateOf(
+            autoStart && ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        )
+    }
     val start = rememberCameraPermission { active = true }
+    val stop = {
+        active = false
+        onStopped()
+    }
 
     if (active) {
         LaunchedEffect(Unit) {
             delay(VIEWFINDER_TIMEOUT_MS)
-            active = false
+            stop()
         }
         Box(
             modifier = modifier
@@ -177,7 +192,7 @@ fun InlineCameraScan(
                 modifier = Modifier.fillMaxSize()
             )
             IconButton(
-                onClick = { active = false },
+                onClick = stop,
                 modifier = Modifier.align(Alignment.TopEnd).padding(6.dp).size(36.dp).background(Color.Black.copy(alpha = 0.45f), CircleShape)
             ) {
                 Icon(imageVector = Icons.Filled.Close, contentDescription = "Stop camera", tint = Color.White, modifier = Modifier.size(20.dp))
