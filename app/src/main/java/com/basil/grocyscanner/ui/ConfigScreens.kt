@@ -210,6 +210,23 @@ fun RowScope.ModeButton(title: String, isSelected: Boolean, onClick: () -> Unit)
     }
 }
 
+/** A Settings row with a label and an on/off switch, styled like Enable Gemini AI. */
+@Composable
+private fun SettingsSwitchRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(0.8f),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, style = MaterialTheme.typography.titleMedium, color = Color.White)
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(checkedThumbColor = DeepPurple, checkedTrackColor = Color.LightGray)
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -220,6 +237,10 @@ fun SettingsScreen(
     loadGeminiModels: suspend () -> List<GeminiModelOption>,
     resetDurationSeconds: Int,
     onResetDurationChange: (Int) -> Unit,
+    isSoundEnabled: Boolean,
+    onToggleSound: (Boolean) -> Unit,
+    isVibrationEnabled: Boolean,
+    onToggleVibration: (Boolean) -> Unit,
     viewModel: ScannerViewModel,
     onStartBatchMove: (Int, String) -> Unit,
     onLogout: () -> Unit,
@@ -297,6 +318,11 @@ fun SettingsScreen(
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            SettingsSwitchRow("Sounds", isSoundEnabled, onToggleSound)
+            Spacer(modifier = Modifier.height(8.dp))
+            SettingsSwitchRow("Vibration", isVibrationEnabled, onToggleVibration)
 
             Spacer(modifier = Modifier.height(16.dp))
 

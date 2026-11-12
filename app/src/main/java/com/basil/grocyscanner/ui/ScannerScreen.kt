@@ -59,6 +59,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,6 +67,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -88,12 +90,26 @@ fun GrocyScannerApp(
     resetDurationSeconds: Int,
     onNavigateToSettings: () -> Unit,
     // Takes camera scans; null when this device uses a hardware scanner
-    onCameraScan: ((String) -> Unit)? = null
+    onCameraScan: ((String) -> Unit)? = null,
+    // The Sounds and Vibration settings
+    soundEnabled: Boolean = true,
+    vibrationEnabled: Boolean = true
 ) {
     val state by viewModel.state.collectAsState()
     val currentMode by viewModel.currentMode.collectAsState()
     val context = LocalContext.current
-    val haptic = LocalHapticFeedback.current
+    // Read through State so effects already running see a change
+    val soundOn by rememberUpdatedState(soundEnabled)
+    val vibrationOn by rememberUpdatedState(vibrationEnabled)
+    // Button haptics, silenced along with every other vibration
+    val systemHaptic = LocalHapticFeedback.current
+    val haptic = remember(systemHaptic) {
+        object : HapticFeedback {
+            override fun performHapticFeedback(hapticFeedbackType: HapticFeedbackType) {
+                if (vibrationOn) systemHaptic.performHapticFeedback(hapticFeedbackType)
+            }
+        }
+    }
 
     // Transfer Mode: once an item is scanned with the camera, the camera turns itself
     // back on for the next one, until its X is tapped, it times out, or the mode ends
@@ -112,9 +128,12 @@ fun GrocyScannerApp(
     val openCameraPopup = rememberCameraScanner { cameraScan?.invoke(it) }
     val openCameraCard: (() -> Unit)? = if (onCameraScan != null) openCameraPopup else null
 
-    val vibrator = remember {
+    val systemVibrator = remember {
         val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
         vibratorManager.defaultVibrator
+    }
+    fun vibrate(effect: VibrationEffect) {
+        if (vibrationOn) systemVibrator.vibrate(effect)
     }
 
     var showClearCompleted by remember { mutableStateOf(false) }
@@ -124,7 +143,7 @@ fun GrocyScannerApp(
         onDispose { scanSounds.release() }
     }
     LaunchedEffect(viewModel) {
-        viewModel.sounds.collect { scanSounds.play(it) }
+        viewModel.sounds.collect { if (soundOn) scanSounds.play(it) }
     }
 
     LaunchedEffect(state) {
@@ -132,28 +151,28 @@ fun GrocyScannerApp(
             is ScannerViewModel.AppState.Success -> {
                 if (currentState.isPrinting || currentState.isOpened || currentState.isAddingToList) {
                     val pattern = longArrayOf(0, 200, 100, 200)
-                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                    vibrate(VibrationEffect.createWaveform(pattern, -1))
                 } else {
-                    vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+                    vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
                 }
             }
             is ScannerViewModel.AppState.InventoryResult -> {
                 if (currentState.isOpened) {
                     val pattern = longArrayOf(0, 200, 100, 200)
-                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                    vibrate(VibrationEffect.createWaveform(pattern, -1))
                 } else {
-                    vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+                    vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
                 }
             }
             is ScannerViewModel.AppState.NeedsDate -> {
                 if (currentState.scanErrorTrigger > 0) {
                     // Very strong 5-pulse error haptic, spread out
                     val pattern = longArrayOf(0, 250, 200, 250, 200, 250, 200, 250, 200, 250)
-                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                    vibrate(VibrationEffect.createWaveform(pattern, -1))
                 } else {
                     // Initial prompt haptic
                     val pattern = longArrayOf(0, 150, 100, 150)
-                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                    vibrate(VibrationEffect.createWaveform(pattern, -1))
                 }
             }
             else -> {}
@@ -175,7 +194,7 @@ fun GrocyScannerApp(
     LaunchedEffect(shopping?.scanErrorTrigger) {
         if ((shopping?.scanErrorTrigger ?: 0L) > 0L) {
             val pattern = longArrayOf(0, 250, 200, 250, 200, 250, 200, 250, 200, 250)
-            vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+            vibrate(VibrationEffect.createWaveform(pattern, -1))
         }
     }
     // Errors clear on the same timer as every other result screen
@@ -187,16 +206,16 @@ fun GrocyScannerApp(
     }
     LaunchedEffect(shopping?.notice) {
         val notice = shopping?.notice ?: return@LaunchedEffect
-        vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+        vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
         kotlinx.coroutines.delay(resetDurationSeconds * 1000L)
         viewModel.clearShoppingNotice(notice)
     }
     LaunchedEffect(shopping?.sheet?.id) {
         val sheet = shopping?.sheet ?: return@LaunchedEffect
         if (sheet.isDoNotBuy) {
-            vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 250, 200, 250), -1))
+            vibrate(VibrationEffect.createWaveform(longArrayOf(0, 250, 200, 250), -1))
         } else {
-            vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+            vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
         }
     }
 

@@ -86,6 +86,9 @@ class MainActivity : ComponentActivity() {
                 val currentVm = viewModel
                 var aiEnabledState by remember { mutableStateOf(sharedPrefs.getBoolean("AI_ENABLED", false)) }
                 var resetDurationSeconds by remember { mutableStateOf(sharedPrefs.getInt("RESET_DURATION", 4)) }
+                // Scan sounds and vibration, both on unless turned off in Settings
+                var soundEnabled by remember { mutableStateOf(sharedPrefs.getBoolean("SOUND_ENABLED", true)) }
+                var vibrationEnabled by remember { mutableStateOf(sharedPrefs.getBoolean("VIBRATION_ENABLED", true)) }
                 var geminiModelState by remember { mutableStateOf(GeminiConfig.model(sharedPrefs)) }
 
                 val hasCamera = remember { CameraScanning.hasCamera(this) }
@@ -214,7 +217,14 @@ class MainActivity : ComponentActivity() {
                             onCameraScan = onCameraScan
                         )
                         "scanner" -> currentVm?.let {
-                            GrocyScannerApp(it, resetDurationSeconds, onNavigateToSettings = { currentScreen = "settings" }, onCameraScan = onCameraScan)
+                            GrocyScannerApp(
+                                it,
+                                resetDurationSeconds,
+                                onNavigateToSettings = { currentScreen = "settings" },
+                                onCameraScan = onCameraScan,
+                                soundEnabled = soundEnabled,
+                                vibrationEnabled = vibrationEnabled
+                            )
                         }
                         "settings" -> {
                             // Back gesture does what the back arrow does
@@ -255,6 +265,16 @@ class MainActivity : ComponentActivity() {
                                     resetDurationSeconds = duration
                                     sharedPrefs.edit { putInt("RESET_DURATION", duration) }
                                 },
+                                isSoundEnabled = soundEnabled,
+                                onToggleSound = { enabled ->
+                                    soundEnabled = enabled
+                                    sharedPrefs.edit { putBoolean("SOUND_ENABLED", enabled) }
+                                },
+                                isVibrationEnabled = vibrationEnabled,
+                                onToggleVibration = { enabled ->
+                                    vibrationEnabled = enabled
+                                    sharedPrefs.edit { putBoolean("VIBRATION_ENABLED", enabled) }
+                                },
                                 viewModel = currentVm!!,
                                 onStartBatchMove = { locId, locName ->
                                     currentVm.startBatchMove(locId, locName)
@@ -270,6 +290,8 @@ class MainActivity : ComponentActivity() {
                                     viewModel = null
                                     aiEnabledState = false
                                     resetDurationSeconds = 4
+                                    soundEnabled = true
+                                    vibrationEnabled = true
                                     geminiModelState = GeminiConfig.DEFAULT_MODEL
                                     cameraScanEnabled = false
                                     currentScreen = if (hasCamera) "scanner_choice" else "unconfigured"
