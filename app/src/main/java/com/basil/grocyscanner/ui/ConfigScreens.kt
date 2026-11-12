@@ -86,10 +86,10 @@ import com.mikepenz.aboutlibraries.util.withContext
 /**
  * First-run setup layout: the Basil logo and name across the top, with the
  * step's own content (scanner choice, Grocy or Gemini) centered in the space
- * below it.
+ * below it. With [onBack], a back arrow sits in the top corner.
  */
 @Composable
-internal fun SetupScaffold(content: @Composable ColumnScope.() -> Unit) {
+internal fun SetupScaffold(onBack: (() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
     // Basil draws edge to edge, so keep clear of the status bar and any camera cutout
     BoxWithConstraints(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         // Taller screens get more room above the logo; short ones keep the minimum
@@ -110,6 +110,11 @@ internal fun SetupScaffold(content: @Composable ColumnScope.() -> Unit) {
                 verticalArrangement = Arrangement.Center,
                 content = content
             )
+        }
+        onBack?.let {
+            IconButton(onClick = it, modifier = Modifier.align(Alignment.TopStart).padding(8.dp)) {
+                Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+            }
         }
     }
 }
@@ -161,8 +166,8 @@ fun AiSetupScreen(onEnableAi: () -> Unit, onSkip: () -> Unit, onCameraScan: ((St
 }
 
 @Composable
-fun UnconfiguredScreen(onCameraScan: ((String) -> Unit)? = null) {
-    SetupScaffold {
+fun UnconfiguredScreen(onCameraScan: ((String) -> Unit)? = null, onBack: (() -> Unit)? = null) {
+    SetupScaffold(onBack = onBack) {
         Image(painter = painterResource(id = R.drawable.grocy_logo), contentDescription = "Grocy Logo", modifier = Modifier.size(180.dp))
         Text("API Key Required", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(16.dp))

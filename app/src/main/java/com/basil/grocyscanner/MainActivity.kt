@@ -110,6 +110,13 @@ class MainActivity : ComponentActivity() {
                     if (currentScreen == "scanner_choice") currentScreen = "unconfigured"
                 }
 
+                // Back to the scanner question, e.g. when the setup QR code won't scan this way
+                fun backToScannerChoice() {
+                    sharedPrefs.edit { remove(CameraScanning.PREF_KEY) }
+                    cameraScanEnabled = false
+                    currentScreen = "scanner_choice"
+                }
+
                 // Every scan lands here, from the hardware scanner's broadcast or the camera
                 fun handleScan(scannedText: String, fromHardware: Boolean) {
                     when (currentScreen) {
@@ -187,7 +194,12 @@ class MainActivity : ComponentActivity() {
 
                     when (currentScreen) {
                         "scanner_choice" -> ScannerChoiceScreen(onChoose = { chooseScanner(it) })
-                        "unconfigured" -> UnconfiguredScreen(onCameraScan = onCameraScan)
+                        "unconfigured" -> {
+                            // Only devices with a camera were asked the question
+                            val onBack: (() -> Unit)? = if (hasCamera) ({ backToScannerChoice() }) else null
+                            BackHandler(enabled = onBack != null) { onBack?.invoke() }
+                            UnconfiguredScreen(onCameraScan = onCameraScan, onBack = onBack)
+                        }
                         "ai_setup" -> AiSetupScreen(
                             onEnableAi = {
                                 sharedPrefs.edit { putBoolean("AI_ENABLED", true) }
