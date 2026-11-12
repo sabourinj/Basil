@@ -27,6 +27,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.AddLink
 import androidx.compose.material.icons.filled.AddShoppingCart
 import androidx.compose.material.icons.filled.MoveDown
@@ -102,6 +103,8 @@ fun GrocyScannerApp(
         val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
         vibratorManager.defaultVibrator
     }
+
+    var showClearCompleted by remember { mutableStateOf(false) }
 
     val scanSounds = remember { ScanSounds(context.applicationContext) }
     DisposableEffect(scanSounds) {
@@ -200,6 +203,28 @@ fun GrocyScannerApp(
                 actions = {
                     val shoppingState = state as? ScannerViewModel.AppState.ShoppingList
                     if (shoppingState != null) {
+                        // Clear completed: dimmed when nothing is checked off
+                        val completedCount = shoppingState.items.count { it.isDone() }
+                        IconButton(
+                            onClick = { showClearCompleted = true },
+                            enabled = completedCount > 0 && !shoppingState.isProcessing
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.DeleteSweep,
+                                contentDescription = "Clear completed items",
+                                tint = if (completedCount > 0) Color.White else Color.White.copy(alpha = 0.3f)
+                            )
+                        }
+                        if (showClearCompleted) {
+                            ClearCompletedDialog(
+                                count = completedCount,
+                                onConfirm = {
+                                    showClearCompleted = false
+                                    viewModel.clearCompletedShoppingItems()
+                                },
+                                onDismiss = { showClearCompleted = false }
+                            )
+                        }
                         // While shopping: arm the next scan to go on the list instead of
                         // being bought. Filled in green while armed; tap again to cancel.
                         FilledIconButton(
