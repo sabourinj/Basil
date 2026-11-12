@@ -118,16 +118,7 @@ class EnrichmentWorker(context: Context, params: WorkerParameters) : CoroutineWo
             existingParents = existingParents
         )
 
-        val model = GenerativeModel(
-            modelName = modelName,
-            apiKey = geminiKey,
-            generationConfig = generationConfig {
-                responseMimeType = "application/json"
-                temperature = 0.0f
-            }
-        )
-        val text = model.generateContent(prompt).text ?: throw IllegalStateException("Empty Gemini reply")
-        val json = JSONObject(text)
+        val json = askGemini(geminiKey, modelName, prompt)
 
         val locationId = json.optString("location").lowercase().let { locationIds[it] }
         val groupId = json.optString("group").lowercase().let { groupIds[it] }
@@ -138,16 +129,7 @@ class EnrichmentWorker(context: Context, params: WorkerParameters) : CoroutineWo
             val days = json.optInt("default_best_before_days", 0)
             shelfLifeDays = days.takeIf { it > 0 }
             if (isNew) {
-                val update = mutableMapOf<String, Any>(
-                    "default_best_before_days" to days,
-                    "default_best_before_days_after_open" to json.optInt("default_best_before_days_after_open", 0),
-                    "default_best_before_days_after_freezing" to json.optInt("default_best_before_days_after_freezing", 0),
-                    "default_best_before_days_after_thawing" to json.optInt("default_best_before_days_after_thawing", 0),
-                    "should_not_be_frozen" to json.optInt("should_not_be_frozen", 0)
-                )
-                groupId?.let { update["product_group_id"] = it }
-                locationId?.let { update["location_id"] = it }
-                api.updateProduct(productId, update)
+                api.updateProduct(productId, productDetailsUpdate(json, locationId, groupId))
             }
         } else if (needsBestBefore && product.default_best_before_days > 0) {
             shelfLifeDays = product.default_best_before_days
@@ -221,6 +203,33 @@ class EnrichmentWorker(context: Context, params: WorkerParameters) : CoroutineWo
         const val KEY_NEEDS_PRICE = "needs_price"
         const val KEY_NEEDS_BEST_BEFORE = "needs_best_before"
         const val KEY_STOCK_ID = "stock_id"
+
+        suspend fun askGemini(geminiKey: String, modelName: String, prompt: String): JSONObject {
+            val model = GenerativeModel(
+                modelName = modelName,
+                apiKey = geminiKey,
+                generationConfig = generationConfig {
+                    responseMimeType = "application/json"
+                    temperature = 0.0f
+                }
+            )
+            val text = model.generateContent(prompt).text ?: throw IllegalStateException("Empty Gemini reply")
+            return JSONObject(text)
+        }
+
+        // Product fields from a reply that included the shelf-life keys
+        fun productDetailsUpdate(json: JSONObject, locationId: Int?, groupId: Int?): Map<String, Any> {
+            val update = mutableMapOf<String, Any>(
+                "default_best_before_days" to json.optInt("default_best_before_days", 0),
+                "default_best_before_days_after_open" to json.optInt("default_best_before_days_after_open", 0),
+                "default_best_before_days_after_freezing" to json.optInt("default_best_before_days_after_freezing", 0),
+                "default_best_before_days_after_thawing" to json.optInt("default_best_before_days_after_thawing", 0),
+                "should_not_be_frozen" to json.optInt("should_not_be_frozen", 0)
+            )
+            groupId?.let { update["product_group_id"] = it }
+            locationId?.let { update["location_id"] = it }
+            return update
+        }
 
         // Products acting as parents: flagged no-own-stock, or already someone's parent
         fun parentNames(products: List<ProductDetails>): List<String> {
