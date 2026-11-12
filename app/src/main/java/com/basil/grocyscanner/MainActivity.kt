@@ -110,7 +110,7 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 val currentVm = viewModel
                 var aiEnabledState by remember { mutableStateOf(sharedPrefs.getBoolean("AI_ENABLED", false)) }
-                var resetDurationSeconds by remember { mutableStateOf(sharedPrefs.getInt("RESET_DURATION", 4)) }
+                var resetDurationSeconds by remember { mutableStateOf(sharedPrefs.getInt("RESET_DURATION", 8)) }
                 // Scan sounds and vibration, both on unless turned off in Settings
                 var soundEnabled by remember { mutableStateOf(sharedPrefs.getBoolean("SOUND_ENABLED", true)) }
                 var vibrationEnabled by remember { mutableStateOf(sharedPrefs.getBoolean("VIBRATION_ENABLED", true)) }
@@ -324,7 +324,7 @@ class MainActivity : ComponentActivity() {
                                     WorkManager.getInstance(applicationContext).cancelAllWork()
                                     viewModel = null
                                     aiEnabledState = false
-                                    resetDurationSeconds = 4
+                                    resetDurationSeconds = 8
                                     soundEnabled = true
                                     vibrationEnabled = true
                                     volumeScanEnabled = true
