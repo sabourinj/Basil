@@ -480,16 +480,20 @@ fun SettingsScreen(
                             )
                         }
                     } else {
+                        // The dialog's own title already heads this list
                         Column(
-                            modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()),
+                            modifier = Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, bottom = 24.dp).verticalScroll(rememberScrollState()),
                             horizontalAlignment = Alignment.Start
                         ) {
-                            Text("Open Source Libraries", style = MaterialTheme.typography.titleMedium, color = Color.Black, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(16.dp))
-
+                            // Kept by hand: keep in step with the dependencies in app/build.gradle.kts
                             val manualLibs = listOf(
                                 "Jetpack Compose" to "Apache 2.0",
                                 "Material Design 3" to "Apache 2.0",
+                                "CameraX" to "Apache 2.0",
+                                "ML Kit Barcode Scanning" to "ML Kit Terms of Service",
+                                "ZXing" to "Apache 2.0",
+                                "WorkManager" to "Apache 2.0",
+                                "AndroidX Security" to "Apache 2.0",
                                 "Retrofit" to "Apache 2.0",
                                 "OkHttp" to "Apache 2.0",
                                 "Coil" to "Apache 2.0",
