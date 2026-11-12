@@ -31,6 +31,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
+import androidx.work.WorkManager
 import com.basil.grocyscanner.data.GrocyApi
 import com.basil.grocyscanner.data.UserfieldCreateRequest
 import com.basil.grocyscanner.ui.AiSetupScreen
@@ -88,7 +89,8 @@ class MainActivity : ComponentActivity() {
                 var geminiModelState by remember { mutableStateOf(GeminiConfig.model(sharedPrefs)) }
 
                 val hasCamera = remember { CameraScanning.hasCamera(this) }
-                // Installs from before camera scanning have no answer saved and stay on the hardware scanner
+                // Asked on first run and again after logout. Installs from before camera
+                // scanning have no answer saved and stay on the hardware scanner.
                 var cameraScanEnabled by remember { mutableStateOf(hasCamera && sharedPrefs.getBoolean(CameraScanning.PREF_KEY, false)) }
 
                 var currentScreen by remember {
@@ -252,17 +254,18 @@ class MainActivity : ComponentActivity() {
                                     currentScreen = "scanner"
                                 },
                                 onLogout = {
-                                    // The scanner choice describes this device, not the account, so it stays
-                                    val cameraChoice = if (sharedPrefs.contains(CameraScanning.PREF_KEY)) cameraScanEnabled else null
-                                    sharedPrefs.edit {
-                                        clear()
-                                        cameraChoice?.let { putBoolean(CameraScanning.PREF_KEY, it) }
-                                    }
+                                    // Clears everything, the scanner choice included, and
+                                    // starts over from the first-run question
+                                    sharedPrefs.edit { clear() }
+                                    // Queued lookups read the server at run time, so one left
+                                    // waiting could write into the next Grocy connected
+                                    WorkManager.getInstance(applicationContext).cancelAllWork()
                                     viewModel = null
                                     aiEnabledState = false
                                     resetDurationSeconds = 4
                                     geminiModelState = GeminiConfig.DEFAULT_MODEL
-                                    currentScreen = "unconfigured"
+                                    cameraScanEnabled = false
+                                    currentScreen = if (hasCamera) "scanner_choice" else "unconfigured"
                                 },
                                 onNavigateBack = { currentScreen = "scanner" }
                             )
