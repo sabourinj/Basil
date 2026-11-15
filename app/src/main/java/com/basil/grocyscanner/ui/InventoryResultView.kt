@@ -74,6 +74,10 @@ import java.util.Locale
 fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.InventoryResult, viewModel: ScannerViewModel) {
     val context = LocalContext.current
     var showGrocycodeDialog by remember { mutableStateOf(false) }
+    var showLabelPicker by remember { mutableStateOf(false) }
+    val labelChoices = remember(currentState.labelEntries) { labelChoices(currentState.labelEntries) }
+    var showOpenPicker by remember { mutableStateOf(false) }
+    val openChoices = remember(currentState.labelEntries) { openChoices(currentState.labelEntries) }
 
     val infiniteTransition = rememberInfiniteTransition(label = "blink")
     val blinkAlpha by infiniteTransition.animateFloat(
@@ -132,7 +136,14 @@ fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.Inve
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 FilledIconButton(
-                    onClick = { viewModel.performQuickAction(currentState.product.id, "print") },
+                    onClick = {
+                        // No question to ask with one batch (or none): print it
+                        when (labelChoices.size) {
+                            0 -> viewModel.printInventoryLabel(currentState.product.id, null)
+                            1 -> viewModel.printInventoryLabel(currentState.product.id, labelChoices.first().entryId)
+                            else -> showLabelPicker = true
+                        }
+                    },
                     enabled = currentState.canPrint,
                     colors = IconButtonDefaults.filledIconButtonColors(
                         containerColor = if (currentState.isPrinting) Color.White.copy(alpha = blinkAlpha) else Color.White,
@@ -146,7 +157,11 @@ fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.Inve
                 }
 
                 FilledIconButton(
-                    onClick = { viewModel.performQuickAction(currentState.product.id, "open") },
+                    onClick = {
+                        // Only ask when the sealed batches have different due dates
+                        if (openChoices.size > 1) showOpenPicker = true
+                        else viewModel.openInventoryEntry(currentState.product.id, null)
+                    },
                     enabled = currentState.canOpen,
                     colors = IconButtonDefaults.filledIconButtonColors(
                         containerColor = if (currentState.isOpened) Color.White.copy(alpha = blinkAlpha) else Color.White,
@@ -242,6 +257,32 @@ fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.Inve
         }
     }
 
+    if (showLabelPicker) {
+        StockEntryPickerDialog(
+            title = "Print which label?",
+            choices = labelChoices,
+            productOption = "Product label (no dates)",
+            onPick = { choice ->
+                showLabelPicker = false
+                viewModel.printInventoryLabel(currentState.product.id, choice?.entryId)
+            },
+            onDismiss = { showLabelPicker = false }
+        )
+    }
+
+    if (showOpenPicker) {
+        StockEntryPickerDialog(
+            title = "Open which one?",
+            choices = openChoices,
+            productOption = null,
+            onPick = { choice ->
+                showOpenPicker = false
+                viewModel.openInventoryEntry(currentState.product.id, choice?.stockId)
+            },
+            onDismiss = { showOpenPicker = false }
+        )
+    }
+
     Spacer(modifier = Modifier.height(24.dp))
 
     if (currentState.entries.isEmpty()) {
@@ -305,6 +346,127 @@ fun ColumnScope.InventoryResultView(currentState: ScannerViewModel.AppState.Inve
                 currentState.parentStock?.let {
                     HorizontalDivider(color = Color.Gray, modifier = Modifier.padding(vertical = 8.dp))
                     Text(parentStockLabel(it), color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
+}
+
+// One row in the label picker: stock entries whose labels would print the
+// same (same purchased, opened and due dates) are folded together.
+private data class LabelChoice(
+    val entryId: Int,
+    val stockId: String?,
+    val amount: Double,
+    val isOpen: Boolean,
+    val purchased: String?,
+    val opened: String?,
+    val due: String?
+)
+
+private fun labelChoices(entries: List<com.basil.grocyscanner.data.StockEntry>): List<LabelChoice> =
+    entries
+        .groupBy { listOf(it.open == 1, day(it.purchased_date), day(it.opened_date), day(it.best_before_date)) }
+        .map { (_, group) -> group.toChoice() }
+
+// The open picker: sealed entries by due date, which is what opening one
+// rather than another changes. Within a due date, the one bought first goes,
+// as Grocy itself would pick.
+private fun openChoices(entries: List<com.basil.grocyscanner.data.StockEntry>): List<LabelChoice> =
+    entries
+        .filter { it.open == 0 }
+        .sortedWith(compareBy({ day(it.best_before_date) ?: "2999-12-31" }, { day(it.purchased_date) ?: "" }))
+        .groupBy { day(it.best_before_date) }
+        .map { (_, group) -> group.toChoice() }
+
+private fun List<com.basil.grocyscanner.data.StockEntry>.toChoice(): LabelChoice {
+    val first = first()
+    return LabelChoice(
+        entryId = first.id,
+        stockId = first.stock_id,
+        amount = sumOf { it.amount },
+        isOpen = first.open == 1,
+        purchased = day(first.purchased_date),
+        opened = day(first.opened_date),
+        due = day(first.best_before_date)?.takeIf { it != "2999-12-31" }
+    )
+}
+
+private fun day(value: String?): String? = value?.take(10)?.takeIf { it.isNotBlank() }
+
+private fun shortDate(value: String): String = try {
+    val date = LocalDate.parse(value)
+    "${date.monthValue}/${date.dayOfMonth}"
+} catch (e: Exception) {
+    value
+}
+
+@Composable
+// productOption: a last row below the entries that picks none of them (null)
+private fun StockEntryPickerDialog(
+    title: String,
+    choices: List<LabelChoice>,
+    productOption: String?,
+    onPick: (LabelChoice?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        // Same frame as the Gemini model picker
+        androidx.compose.material3.Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = DeepPurple,
+            border = androidx.compose.foundation.BorderStroke(2.dp, Color.White),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.fillMaxWidth().padding(20.dp)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(choices) { choice ->
+                        val first = if (choice.isOpen && choice.opened != null) {
+                            "Opened ${shortDate(choice.opened)}"
+                        } else {
+                            choice.purchased?.let { "Purchased ${shortDate(it)}" } ?: "Sealed"
+                        }
+                        val due = choice.due?.let { "Due ${shortDate(it)}" } ?: "No due date"
+                        val amountStr = if (choice.amount % 1.0 == 0.0) choice.amount.toInt().toString() else choice.amount.toString()
+                        Button(
+                            onClick = { onPick(choice) },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                containerColor = Color.White,
+                                contentColor = DeepPurple
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("$first · $due", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            Text("×$amountStr")
+                        }
+                    }
+                }
+
+                if (productOption != null) {
+                    HorizontalDivider(color = Color.Gray, modifier = Modifier.padding(vertical = 12.dp))
+                    Button(
+                        onClick = { onPick(null) },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = Color.White.copy(alpha = 0.15f),
+                            contentColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(productOption)
+                    }
                 }
             }
         }

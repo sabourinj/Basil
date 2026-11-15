@@ -128,7 +128,9 @@ class ScannerViewModel(
             val isAddingToList: Boolean = false,
             val canOpen: Boolean = false,
             val canPrint: Boolean = false,
-            val parentStock: ParentStock? = null
+            val parentStock: ParentStock? = null,
+            // The ungrouped stock rows, for choosing which one to print a label for
+            val labelEntries: List<StockEntry> = emptyList()
         ) : AppState()
         data class LinkingChild(val product: ProductDetails, val parentBarcode: String) : AppState()
         data class ChildQuantityPrompt(val product: ProductDetails, val parentBarcode: String, val childBarcode: String) : AppState()
@@ -959,7 +961,10 @@ class ScannerViewModel(
                         }
                         .sortedBy { it.best_before_date }
                     val parentStock = fetchParentStock(product, rawEntries.sumOf { it.amount })
-                    _state.value = AppState.InventoryResult(product, groupedEntries, canOpen = canOpen, canPrint = canPrint, parentStock = parentStock)
+                    _state.value = AppState.InventoryResult(
+                        product, groupedEntries, canOpen = canOpen, canPrint = canPrint, parentStock = parentStock,
+                        labelEntries = rawEntries.sortedWith(labelEntryOrder)
+                    )
                 } catch (e: Exception) {
                     showError("Failed to fetch stock entries.", e)
                 }
@@ -1187,6 +1192,77 @@ class ScannerViewModel(
         }
     }
 
+    // Grocy prints a stock entry label by the row's numeric id, but a booking
+    // only hands back the entry's stock_id UUID, so look the row up. Grocy
+    // sends the row with the label, which is where the purchased and opened
+    // dates come from.
+    //
+    // Opened entries come first: once something's opened, the label worth
+    // printing is the one with its opened and discard dates. Opening part of
+    // an entry splits it into rows sharing one stock_id, so that applies
+    // there too. With no stock_id, it's the opened entry, else the sealed one
+    // that goes off soonest.
+    private suspend fun resolveLabelEntry(productId: Int, stockId: String?): StockEntry? {
+        val entries = api.getStockEntries(productId).sortedWith(labelEntryOrder)
+        if (stockId != null) {
+            entries.firstOrNull { it.stock_id == stockId }?.let { return it }
+        }
+        return entries.firstOrNull()
+    }
+
+    // Opened first, then by due date
+    private val labelEntryOrder = compareBy<StockEntry>(
+        { if (it.open == 1) 0 else 1 },
+        { it.best_before_date?.takeIf { d -> d.isNotBlank() } ?: "2999-12-31" }
+    )
+
+    // Inventory mode's print: one label for the stock entry the user picked,
+    // or the product label (no dates) when entryId is null.
+    fun printInventoryLabel(productId: Int, entryId: Int?) {
+        viewModelScope.launch {
+            (_state.value as? AppState.InventoryResult)?.let { _state.value = it.copy(isPrinting = true) }
+            try {
+                if (entryId != null) api.printStockLabel(entryId) else api.printLabel(productId)
+            } catch (e: Exception) {
+                showError("Connection Error: Print failed", e)
+            }
+        }
+    }
+
+    // Inventory mode's open: one of the stock entry the user picked (by its
+    // stock_id), or whichever Grocy picks when stockId is null.
+    fun openInventoryEntry(productId: Int, stockId: String?) {
+        viewModelScope.launch {
+            try {
+                api.openStock(productId, OpenStockRequest(1, stock_entry_id = stockId))
+                (_state.value as? AppState.InventoryResult)?.let { refreshInventoryAfterOpen(it, productId) }
+            } catch (e: Exception) {
+                showError("Connection Error: Open failed", e)
+            }
+        }
+    }
+
+    private suspend fun refreshInventoryAfterOpen(currentState: AppState.InventoryResult, productId: Int) {
+        val rawEntries = api.getStockEntries(productId)
+        val canOpen = rawEntries.any { it.open == 0 }
+        val groupedEntries = rawEntries
+            .groupBy { if (it.best_before_date.isNullOrBlank()) "2999-12-31" else it.best_before_date }
+            .map { mapEntry ->
+                StockEntry(
+                    id = mapEntry.value.first().id,
+                    amount = mapEntry.value.sumOf { it.amount },
+                    best_before_date = mapEntry.key,
+                    open = if (mapEntry.value.all { it.open == 1 }) 1 else 0,
+                    location_id = mapEntry.value.first().location_id
+                )
+            }
+            .sortedBy { it.best_before_date }
+        _state.value = currentState.copy(
+            entries = groupedEntries, isOpened = true, canOpen = canOpen,
+            labelEntries = rawEntries.sortedWith(labelEntryOrder)
+        )
+    }
+
     // announce: play the "printed" sound as printing starts. Used for the
     // purchase auto-print, which happens without the user tapping anything.
     fun performQuickAction(productId: Int, action: String, stockId: String? = null, amount: Double = 1.0, announce: Boolean = false) {
@@ -1208,26 +1284,10 @@ class ScannerViewModel(
                         if (currentState is AppState.Success) {
                             _state.value = currentState.copy(isOpened = true)
                         } else if (currentState is AppState.InventoryResult) {
-                            // If opening from inventory, refresh the list
-                            val rawEntries = api.getStockEntries(productId)
-                            val canOpen = rawEntries.any { it.open == 0 }
-                            val groupedEntries = rawEntries
-                                .groupBy { if (it.best_before_date.isNullOrBlank()) "2999-12-31" else it.best_before_date }
-                                .map { mapEntry ->
-                                    StockEntry(
-                                        id = mapEntry.value.first().id,
-                                        amount = mapEntry.value.sumOf { it.amount },
-                                        best_before_date = mapEntry.key,
-                                        open = if (mapEntry.value.all { it.open == 1 }) 1 else 0,
-                                        location_id = mapEntry.value.first().location_id
-                                    )
-                                }
-                                .sortedBy { it.best_before_date }
-                            _state.value = currentState.copy(entries = groupedEntries, isOpened = true, canOpen = canOpen)
+                            refreshInventoryAfterOpen(currentState, productId)
                         }
                     }
                     "print" -> {
-                        val printCount = if (amount > 0) Math.ceil(amount).toInt() else 1
                         val successState = _state.value as? AppState.Success
                         if (successState != null) {
                             _state.value = successState.copy(isPrinting = true)
@@ -1242,10 +1302,25 @@ class ScannerViewModel(
                         // the error sound.
                         if (announce) playSound(ScanSound.PRINTED)
 
+                        // A stock entry label carries the dates; a product label doesn't.
+                        val entry = try {
+                            resolveLabelEntry(productId, stockId)
+                        } catch (e: Exception) {
+                            Log.w("BasilDebug", "Couldn't look up the stock entry to print: ${e.message}")
+                            null
+                        }
+                        val entryId = entry?.id
+                        // One per unit bought, but an opened item gets just its own label
+                        val printCount = when {
+                            entry?.open == 1 -> 1
+                            amount > 0 -> Math.ceil(amount).toInt()
+                            else -> 1
+                        }
+
                         repeat(printCount) {
                             try {
-                                if (stockId != null) {
-                                    api.printStockLabel(stockId)
+                                if (entryId != null) {
+                                    api.printStockLabel(entryId)
                                 } else {
                                     api.printLabel(productId)
                                 }
