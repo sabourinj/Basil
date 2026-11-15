@@ -66,8 +66,9 @@ interface GrocyApi {
     @GET("stock/products/{productId}/printlabel")
     suspend fun printLabel(@Path("productId") productId: Int)
 
-    @GET("stock/entry/{stockId}/printlabel")
-    suspend fun printStockLabel(@Path("stockId") stockId: String)
+    // entryId is the stock row's numeric id, not its stock_id UUID
+    @GET("stock/entry/{entryId}/printlabel")
+    suspend fun printStockLabel(@Path("entryId") entryId: Int)
 
     @GET("stock/barcodes/external-lookup/{barcode}")
     suspend fun externalBarcodeLookup(@Path("barcode") barcode: String, @Query("add") add: Boolean = true): Any

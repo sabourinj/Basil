@@ -113,7 +113,9 @@ data class ConsumeStockRequest(
 )
 
 data class OpenStockRequest(
-    val amount: Int = 1
+    val amount: Int = 1,
+    // A stock entry's stock_id, to open that one rather than the one Grocy picks
+    val stock_entry_id: String? = null
 )
 
 data class ShoppingListItem(
@@ -146,6 +148,7 @@ data class StockEntry(
     val location_id: Int? = null,
     val stock_id: String? = null,
     val purchased_date: String? = null,
+    val opened_date: String? = null,
     val price: Double? = null,
     val shopping_location_id: Int? = null,
     val note: String? = null
